@@ -1,4 +1,104 @@
 #!/usr/bin/perl -w
+#
+# Copyright 2009, Byrne Reese.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+#
+#
+=head1 NAME
+
+mt-install.cgi - Simple, fast and bullet proof Open Melody installer.
+
+=head1 DESCRIPTION
+
+This "simple" CGI application makes installing Movable Type and Open
+Melody as simple as:
+
+1. Upload one file to web server.
+
+2. Follow on screen instructions.
+
+And that's it. The installer automatically detects what configuration
+is best for your system, and if it encounters difficulty will attempt
+to make corrections automatically.
+
+=head1 PROCESS
+
+1. Prompt the user for information about their server (with good  
+guesses as a default): docroot path, base url, cgi-bin path.
+
+2. Check to see what installation options are available and possible:
+
+     a) install all of OM into a cgi-bin directory
+     b) install all of OM into a ExecCGI enabled directory in your docroot
+     c) install app files into cgi-bin and static files into docroot
+
+3. Prompt user to select an installation option. For those options  
+which are not possible, due to permission or web server constraints,  
+the user will be given a link to learn precisely what they need to do  
+to resolve the conflict.
+
+4. Prompt user to specify where they want OM to be installed  
+specifically.
+
+5. Check the server for installed prerequisites. If any core prereqs  
+are missing, block. If any optional prereqs are missing display user a  
+list of features that will not be available. Give user the option to  
+attempt to install missing prerequisites into the extlib directory of  
+OM. If there is a failure, let them know and give them instructions or  
+even an email they can send to their hosting provider detailing what  
+needs to be done.
+
+6. If everything checks out, then download OM. If perl possesses the  
+ability to unzip an archive than a single zip will be downloaded and  
+unzipped into the designated directory. If such an ability does not  
+exist, attempt to download and install Archive::Extract. If that  
+fails, then download each file independently and put it in proper place.
+
+7. Download manifest from server. Manifest will include CRC values.  
+Perform CRC check on ALL installed files. Error on any failure.  
+Attempt to re-download any missing files.
+
+8. Collect DB connection info. Verify that they are correct.
+
+9. Check to see if Fast CGI is possible.
+
+9. Write user's mt-config.cgi file (with fcgi scripts setup if  
+allowable).
+
+10. Attempt to harden server directories:
+
+     a) make support directory writable
+     b) make other scripts and files unwritable by group
+
+11. Attempt to setup a crontab entry for run-periodic-tasks? Should I  
+do this?
+
+12. Finish - tell user what they need to do to secure their server.  
+Offer to send them instructions via email.
+
+13. Kick user into standard OM/MT setup wizard to setup first account.
+
+=head1 LICENSE
+
+This program is licensed under the GPL v3.
+
+=head1 AUTHOR
+
+Byrne Reese <byrne@majordojo.com>
+
+=cut
 
 use strict;
 use Cwd;
@@ -6,13 +106,14 @@ use CGI qw/:standard/;
 use LWP::UserAgent;
 use File::Spec;
 use File::Path;
+use File::Copy qw/ copy /;
 use File::Temp qw/ tempfile tempdir /;
 
 use constant VERSION   => 0.1;
 use constant DEBUG     => 1;
 use constant TEST_FILE => 'test.html';
 use constant OM_DOWNLOAD_URL 
-    => 'http://www.movabletype.org/downloads/stable/MTOS-4.24-en.zip';
+    => 'http://www.movabletype.org/downloads/stable/MTOS-4.25-en.zip';
 use constant ARCHIVE_EXTRACT_URL
     => 'http://cpansearch.perl.org/src/KANE/Archive-Extract-0.30/lib/Archive/Extract.pm';
 use constant IPC_CMD_URL
@@ -25,7 +126,7 @@ use constant MODULE_LOAD_URL
     => 'http://cpansearch.perl.org/src/KANE/Module-Load-0.16/lib/Module/Load.pm';
 
 my $TYPE      = param('type');
-my $MTHOME    = param('mthome');
+my $FOLDER    = param('folder');
 my $MTSTATIC  = param('mtstatic');
 my $DOCROOT   = param('docroot');
 my $BASEURL   = param('baseurl');
@@ -120,7 +221,7 @@ sub is_cgibin_writable {
 
 sub is_docroot_writable {
    my $dir = $DOCROOT;
-#   print "<p>docroot is $DOCROOT</p>";
+#   debug("docroot is $DOCROOT");
    if (!-w $DOCROOT) {
 	chmod 0775, $DOCROOT;
 	if (!-w $DOCROOT) { 
@@ -134,16 +235,16 @@ sub permissions_check {
     my $dir = getcwd;
     print "<p>Is $dir writable? ";
     if (!-w $dir) {
-	print "no. Try again. Successful? ";
+	debug("$dir is not writable. Try again.");
 	# Attempt to fix
 	chmod 0775, $dir;
 	if (!-w $dir) { 
-	    print "no.</p>"; 
+	    debug("Nope, still not writable.");
 	    print "<p>This is what you do to fix your permissions problem.</p>";
 	    return 0; 
 	}
     }
-    print "yes</p>";
+    debug("$dir is writable");
     return 1;
 }
 
@@ -158,9 +259,9 @@ sub prerequisites_check {
 	    }
 	    eval("use $mod" . ($ver ? " $ver;" : ";"));
 	    if ($@) {
-		print "<p>$mod is NOT installed.</p>";
+		debug("$mod is NOT installed.");
 	    } else {
-#		print "<p>$mod is installed.</p>";
+#		debug("$mod is installed.");
 	    }
 	}
     }
@@ -172,23 +273,24 @@ sub download_dep {
     my @parts = split('/',$dir);
     my $file = pop @parts;
     $dir = File::Spec->catdir( $libdir, @parts);
-    #print "<p>Making dir $dir</p>";
+    #debug("Making dir $dir");
     mkpath($dir);
     if (!-e $dir) {
-	print "<p>Could not create $dir</p>";
+	debug("Could not create $dir");
 	return 0;
     } 
-    print "<p>Downloading $file into $dir</p>";
+    debug("Downloading $file into $dir");
     my $down = File::Download->new({ outfile => $dir });
     $down->download($url);
 }
 
 sub download_openmelody {
     eval 'use Archive::Extract';
+    $Archive::Extract::DEBUG = 1;
     my $dir = make_tmpdir();
     if ($@) {
 	# download each file separately
-	print "<p>Um... Archive::Extract is not installed.</p>";
+	debug("Um... Archive::Extract is not installed.");
 	my $extlib = File::Spec->catdir( $dir, 'extlib' );
 	download_dep( $extlib, ARCHIVE_EXTRACT_URL );
 	download_dep( $extlib, IPC_CMD_URL );
@@ -200,33 +302,71 @@ sub download_openmelody {
 #	print "<p>INC is now " . join("<br>",@INC)."</p>";
 	eval 'use Archive::Extract';
 	if ($@) {
-	    print "<p>Attempt to install and use Archive Extract failed: $@</p>";
+	    debug("Attempt to install and use Archive Extract failed: $@");
 	    return 0;
 	}
     }
-    print "<p>Saving Open Melody into $dir</p>";
+    debug("Saving Open Melody into $dir");
     my $down = File::Download->new({
 	overwrite => 1,
 	outfile => $dir,
     });
-    print "<p>Downloading: " . OM_DOWNLOAD_URL . "</p>";
+    debug("Downloading: " . OM_DOWNLOAD_URL);
     $down->download(OM_DOWNLOAD_URL);
-    print "<p>Downloaded: " . $down->saved . "</p>";
+#    copy('/Users/breese/Sites/mt-install/MTOS-4.24-en.zip',$dir);
+#    $down->saved(File::Spec->catfile($dir,'MTOS-4.24-en.zip'));
+    debug("Downloaded: " . $down->saved);
     # unpack archive
     my $archive = Archive::Extract->new(
 	archive => $down->saved,
-        );
-    $archive->extract( to => $dir );
-    my ($mtdir) = ($down->saved =~ /([^\/]*)\.zip/);
-    print "<p>An unpacked MT lives in: $mtdir</p>";
-    if ($TYPE == 1) {
-	# all in cgi-bin
-    } elsif ($TYPE == 2) {
-	# all in docroot
-    } elsif ($TYPE == 3) {
-	# static in docroot
+    );
+    my $ok = $archive->extract(
+	to => $dir 
+    );
+    if ($ok) {
+	print "<p>Unarchive successful! An unpacked MT lives in: ".$archive->extract_path."</p>";
     } else {
-	# this should never happen
+	print "<p>FAIL. Could not unpack into $dir</p>";
+	return;
+    }
+#    my ($mtdir) = ($down->saved =~ /([^\/]*)\.zip/);
+    my ($mtdir) = ($archive->extract_path =~ /([^\/]*)$/);
+    debug("root = $mtdir");
+    my $files = $archive->files;
+    foreach my $file (@$files) {
+#	debug("file = $file");
+	my $dest = $file;
+	$dest =~ s/^$mtdir\/?//;
+	my $orig = File::Spec->catfile($archive->extract_path, $dest);
+#	next unless -e $orig;
+	if ($TYPE == 1) {
+	    # all in cgi-bin
+	    $dest = File::Spec->catfile($CGIBIN, $FOLDER, $dest);
+	} elsif ($TYPE == 2) {
+	    # all in docroot
+	    $dest = File::Spec->catfile($DOCROOT, $FOLDER, $dest);
+	} elsif ($TYPE == 3) {
+	    # static in docroot
+	    if ($dest =~ /^mt-static/) { 
+		debug("Installing static file");
+		$dest = File::Spec->catfile($DOCROOT, $dest);
+	    } else {
+		debug("Installing application file");
+		$dest = File::Spec->catfile($CGIBIN, $FOLDER, $dest);
+	    }
+	} else {
+	    # this should never happen
+	}
+	if (-d $orig) {
+	    debug("Making the directory $dest");
+	    mkpath($dest);
+	} elsif (-f $orig) {
+	    debug("Intalling $orig into $dest");
+	    copy($orig,$dest);
+	    chmod 0755, $dest if ($orig =~ /\.cgi$/);
+	} else {
+	    debug("Something weird happened when copying $orig. Its not a file for directory.");
+	}
     }
 }
 
@@ -236,16 +376,18 @@ sub unpack_openmelody {
 
 sub make_tmpdir {
     my $dir = tempdir( );
+    chmod 0775, $dir;
+#    return "/tmp/y9e1wtwfPU";
     return $dir;
 }
 
 sub check_htaccess_and_cgi {
     my $tmpdir = 'tmp_' . int(rand(1000000));
     my $dir = File::Spec->catdir($DOCROOT , $tmpdir);
-#    print "<p>Making $dir</p>";
+#    debug("Making $dir");
     mkdir($dir);
     my $htaccess = File::Spec->catfile($dir, '.htaccess');
-#    print "<p>Creating $htaccess</p>";
+#    debug("Creating $htaccess");
     open HTACCESS, ">$htaccess";
     print HTACCESS q{
 Options +ExecCGI +Includes
@@ -253,7 +395,7 @@ AddHandler cgi-script .cgi
     };
     close HTACCESS;
     my $cgi = File::Spec->catfile($dir, 'test.cgi');
-#    print "<p>Creating $cgi</p>";
+#    debug("Creating $cgi");
     open CGI, ">$cgi";
     print CGI q{#!/usr/bin/perl
 print "Content-type: text/plain\n\n";
@@ -266,11 +408,11 @@ print "ok";
     my $res = _getfile($url);
     if ($res->is_success) {
 	if ($res->content ne 'ok') {
-#	    print "<p>Contents of test file are incorrect: ".$res->content."</p>";
+#	    debug("Contents of test file are incorrect: ".$res->content);
 	    return 0;
 	} 
     } else {
-#	print "<p>Could not get test file.</p>";
+#	debug("Could not get test file.");
 	return 0;
     }
     rmtree($dir);
@@ -287,16 +429,32 @@ sub prompt_for_mthome {
 <script type="text/javascript">
 var cgibin = "$CGIBIN";
 var baseurl = "$BASEURL";
-\$(document).ready(function(){
-  \$('#folder').keypress(function() {
-    var folder = \$('#folder').val();
-    \$('#mthome').val( cgibin + folder + "/mt.cgi"); 
-    \$('#mtstatic').val( baseurl + folder + "/mt-static/"); 
+}.q{
+$(document).ready(function(){
+  $('#folder').keypress(function() {
+    var folder = $('#folder').val();
+    $('#mthome').val( cgibin + folder + "/mt.cgi"); 
+    $('#mtstatic').val( baseurl + folder + "/mt-static/"); 
   });
-  \$('.impossible input').attr('disabled',true);
-  \$('.install_opt li').each(function(i,e){ 
-     if (\$("#" + this.id + ' input').attr('disabled') != true) {
-       \$('#' + this.id + ' input').attr('checked', true);
+  $('.install-type').click(function() {
+    var id = $(this).attr('id');
+    $('.folder').fadeOut('fast',function() {
+      if (id.toString() == "type1") {
+        $('#folder-mthome.folder').fadeIn('fast');
+      } else if (id == "type2") {
+        $('#folder-docroot').fadeIn('fast');
+      } else if (id == "type3") {
+        $('#folder-mthome').fadeIn('fast');
+        $('#folder-mtstatic').fadeIn('fast');
+      } else {
+        alert("this shouldn't happen");
+      }
+    });
+  });
+  $('.impossible input').attr('disabled',true);
+  $('.install_opt li').each(function(i,e){ 
+     if ($("#" + this.id + ' input').attr('disabled') != true) {
+       $('#' + this.id + ' input').attr('checked', true);
        return;
      }
   });
@@ -306,28 +464,25 @@ var baseurl = "$BASEURL";
     print q{<form action="mt-install.cgi">};
     print q{  <h2>Time to pick a folder name</h2>};
     print q{  <p>Give the folder you are going to Open Melody a name:</p>};
-    print q{  <ul class="folder">};
+    print q{  <ul class="folder-name">};
     print q{    <li class="pkg"><label>Folder: <input type="text" id="folder" name="folder" value="mt" size="40" /></label></li>};
     print q{  </ul>};
-#    print q{  <p><input type="submit" name="submit" value="Next" /></p>};
-#    print q{</form>};
 
     my ($can_one,$can_two,$can_three) = check_for_available_install_options();
-#    print q{<form action="mt-install.cgi">};
-#    print q{  <input type="hidden" name="docroot" value="$DOCROOT" />};
-#    print q{  <input type="hidden" name="cgibin" value="$CGIBIN" />};
-#    print q{  <input type="hidden" name="mthome" value="$MTHOME" />};
-#    print q{  <input type="hidden" name="mtstatic" value="$MTSTATIC" />};
+    print qq{  <input type="hidden" name="docroot" value="$DOCROOT" />};
+    print qq{  <input type="hidden" name="cgibin" value="$CGIBIN" />};
+    print qq{  <input type="hidden" name="mtstatic" value="$MTSTATIC" />};
 
    print q{  <h2>And an install option</h2>};
     print q{  <ul class="install_opt">};
-    print q{    <li id="type1" class="pkg }.($can_one ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="1" /> Install all of Open Melody in cgi-bin</label></li>};
-    print q{    <li id="type2" class="pkg }.($can_two ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="2" /> Install all of Open Melody in document root</label></li>};
-    print q{    <li id="type3" class="pkg }.($can_three ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="3" /> Install app files in cgi-bin, and static files in document root</label></li>};
+    print q{    <li id="type1" class="install-type pkg }.($can_one ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="1" /> Install all of Open Melody in cgi-bin</label> }.(!$can_one ? '<a href="#">Fix me</a>' : '').q{</li>};
+    print q{    <li id="type2" class="install-type pkg }.($can_two ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="2" /> Install all of Open Melody in document root</label> }.(!$can_two ? '<a href="#">Fix me</a>' : '').q{</li>};
+    print q{    <li id="type3" class="install-type pkg }.($can_three ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="3" /> Install app files in cgi-bin, and static files in document root</label> }.(!$can_three ? '<a href="#">Fix me</a>' : '').q{</li>};
     print q{  </ul>};
     print q{  <ul class="folder">};
-     print qq{    <li class="pkg wrap mthome"><label for="mthome">URL to Open Melody Admin:</label><input type="text" id="mthome" name="mthome" size="40" value="${CGIBIN}mt/mt.cgi" /></li>};
-    print qq{    <li class="pkg wrap mtstatic"><label for="mtstatic">URL to Static Content:</label><input type="text" id="mtstatic" name="mtstatic" size="40" value="${BASEURL}mt-static/" /></li>};
+     print qq{    <li id="folder-mthome" class="pkg wrap folder"><label for="mthome">URL to Open Melody Admin:</label><input type="text" id="mthome" name="mthome" size="40" value="${CGIBINURL}mt/mt.cgi" /></li>};
+    print qq{    <li id="folder-mtstatic" class="pkg wrap folder"><label for="mtstatic">URL to Static Content:</label><input type="text" id="mtstatic" name="mtstatic" size="40" value="${BASEURL}mt-static/" /></li>};
+    print qq{    <li id="folder-docroot" class="pkg wrap folder"><label for="docroot">URL to Open Melody:</label><input type="text" id="mtstatic" name="mtstatic" size="40" value="${BASEURL}mt/mt.cgi" /></li>};
     print q{  </ul>};
     print q{  <p><input type="submit" name="submit" value="Next" /></p>};
     print q{</form>};
@@ -339,14 +494,15 @@ sub prompt_for_file_paths {
 <script type="text/javascript">
 var cgibin = "$CGIBIN";
 var baseurl = "$BASEURL";
-\$(document).ready(function(){
-  \$('#baseurl').bind("keypress change",function() {
-    var base = \$('#baseurl').val();
-    \$('#cgibinurl').val( base + "cgi-bin/"); 
+}.q{
+$(document).ready(function(){
+  $('#baseurl').bind("keypress change",function() {
+    var base = $('#baseurl').val();
+    $('#cgibinurl').val( base + "cgi-bin/"); 
   });
-  \$('#docroot').bind("keypress change",function() {
-    var base = \$('#docroot').val();
-    \$('#cgibin').val( base + "cgi-bin/"); 
+  $('#docroot').bind("keypress change",function() {
+    var base = $('#docroot').val();
+    $('#cgibin').val( base + "cgi-bin/"); 
   });
 });
 </script>
@@ -385,7 +541,6 @@ sub prompt_for_install_option() {
     print q{<form action="mt-install.cgi">};
     print q{  <input type="hidden" name="docroot" value="$DOCROOT" />};
     print q{  <input type="hidden" name="cgibin" value="$CGIBIN" />};
-    print q{  <input type="hidden" name="mthome" value="$MTHOME" />};
     print q{  <input type="hidden" name="mtstatic" value="$MTSTATIC" />};
     print q{  <ul class="install_opt">};
     print q{    <li class="pkg }.($can_one ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="1" /> Install all of Open Melody in cgi-bin</label></li>};
@@ -398,36 +553,34 @@ sub prompt_for_install_option() {
 
 sub debug {
     my ($str) = @_;
-    print "$str\n" if DEBUG;
+    print "<p>$str</p>\n" if DEBUG;
 }
 
 sub write_test_file {
     my $dir = getcwd;
     my $file = File::Spec->catfile($dir , TEST_FILE);
-#    print "<p>Writing test file '$file': ";
     my $fail = 0;
     open FILE,">$file" or $fail = 1;
     if ($fail) {
-#	print "failed, $!</p>";
+#    debug("Writing test file '$file': failed, $!");
 	return 0;
     }
     print FILE "ok";
     close FILE;
-#    print " success</p>";
+#    debug("Writing test file '$file': success!");
     return 1;
 }
 
 sub get_current_url {
-#    print "<p>Current URL is: ";
     my $Q = new CGI;
     my $url = "http" . ($Q->https() ? 's' : '') . "://" . $Q->server_name() . $Q->script_name();
-#    print "$url</p>";
+#    debug("Current URL is: $url");
     return $url;
 }
 
 sub _getfile {
     my ($url) = @_;
-#    print "<p>Fetching $url</p>";
+#    debug("Fetching $url");
     my $ua = new LWP::UserAgent;
     $ua->agent("Movable Type Installer/".VERSION); 
     my $req = new HTTP::Request GET => $url;
@@ -443,21 +596,21 @@ sub cgibin_can_serve_static_files {
     my $res = _getfile($url);
     if ($res->is_success) {
 	if ($res->content ne 'ok') {
-#	    print "<p>Contents of test file are incorrect: ".$res->content."</p>";
+#	    debug("Contents of test file are incorrect: ".$res->content);
 	    return 0;
 	} 
     } else {
-#	print "<p>Could not get test file.</p>";
+#	debug("Could not get test file.");
 	return 0;
     }
-#    print "<p>cgi-bin directory can serve static files.</p>";
+#    debug("cgi-bin directory can serve static files.");
     return 1;
 }
 
 sub main {
     if (!$DOCROOT || !$CGIBIN) {
 	prompt_for_file_paths();
-    } elsif (!$MTHOME) {
+    } elsif (!$FOLDER) {
 	prompt_for_mthome();
     } elsif (!$TYPE) {
 	prompt_for_install_option();
