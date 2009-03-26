@@ -127,11 +127,17 @@ use constant MODULE_LOAD_URL
 
 my $TYPE      = param('type');
 my $FOLDER    = param('folder');
-my $MTSTATIC  = param('mtstatic');
+my $UPGRADE   = param('upgrade');
+
 my $DOCROOT   = param('docroot');
 my $BASEURL   = param('baseurl');
 my $CGIBIN    = param('cgibin');
 my $CGIBINURL = param('cgibinurl');
+
+my $DBNAME    = param('dbname');
+my $DBUSER    = param('dbuser');
+my $DBPASS    = param('dbpass');
+my $DBHOST    = param('dbhost');
 
 my @CORE_REQ = (
     [ 'CGI', 0, 1, 'CGI is required for all Movable Type application functionality.' ],
@@ -313,8 +319,6 @@ sub download_openmelody {
     });
     debug("Downloading: " . OM_DOWNLOAD_URL);
     $down->download(OM_DOWNLOAD_URL);
-#    copy('/Users/breese/Sites/mt-install/MTOS-4.24-en.zip',$dir);
-#    $down->saved(File::Spec->catfile($dir,'MTOS-4.24-en.zip'));
     debug("Downloaded: " . $down->saved);
     # unpack archive
     my $archive = Archive::Extract->new(
@@ -329,16 +333,13 @@ sub download_openmelody {
 	print "<p>FAIL. Could not unpack into $dir</p>";
 	return;
     }
-#    my ($mtdir) = ($down->saved =~ /([^\/]*)\.zip/);
     my ($mtdir) = ($archive->extract_path =~ /([^\/]*)$/);
     debug("root = $mtdir");
     my $files = $archive->files;
     foreach my $file (@$files) {
-#	debug("file = $file");
 	my $dest = $file;
 	$dest =~ s/^$mtdir\/?//;
 	my $orig = File::Spec->catfile($archive->extract_path, $dest);
-#	next unless -e $orig;
 	if ($TYPE == 1) {
 	    # all in cgi-bin
 	    $dest = File::Spec->catfile($CGIBIN, $FOLDER, $dest);
@@ -360,6 +361,7 @@ sub download_openmelody {
 	if (-d $orig) {
 	    debug("Making the directory $dest");
 	    mkpath($dest);
+	    chmod 0755, $dest if ($dest =~ /^mt-static\/support/);
 	} elsif (-f $orig) {
 	    debug("Intalling $orig into $dest");
 	    copy($orig,$dest);
@@ -368,23 +370,36 @@ sub download_openmelody {
 	    debug("Something weird happened when copying $orig. Its not a file for directory.");
 	}
     }
-}
-
-sub unpack_openmelody {
-
+    # Finished. Now, let's install the config.
+    my ($dest,$cgi,$static);
+    if ($TYPE == 1) {
+	# all in cgi-bin
+	$dest = File::Spec->catfile($CGIBIN, $FOLDER, 'mt-config.cgi');
+	$cgi = $CGIBINURL;
+	$static = File::Spec->catdir($CGIBINURL, $FOLDER, 'mt-static');
+    } elsif ($TYPE == 2) {
+	# all in docroot
+	$dest = File::Spec->catfile($DOCROOT, $FOLDER, 'mt-config.cgi');
+	$cgi = $BASEURL;
+	$static = File::Spec->catdir($BASEURL, $FOLDER, 'mt-static');
+    } elsif ($TYPE == 3) {
+	# app in cgi-bin, static in docroot
+	$dest = File::Spec->catfile($CGIBIN, $FOLDER, 'mt-config.cgi');
+	$cgi = $CGIBINURL;
+	$static = File::Spec->catdir($BASEURL, 'mt-static');
+    }
+    write_config($dest,$cgi,$static);
 }
 
 sub make_tmpdir {
     my $dir = tempdir( );
     chmod 0775, $dir;
-#    return "/tmp/y9e1wtwfPU";
     return $dir;
 }
 
 sub check_htaccess_and_cgi {
     my $tmpdir = 'tmp_' . int(rand(1000000));
     my $dir = File::Spec->catdir($DOCROOT , $tmpdir);
-#    debug("Making $dir");
     mkdir($dir);
     my $htaccess = File::Spec->catfile($dir, '.htaccess');
 #    debug("Creating $htaccess");
@@ -470,8 +485,9 @@ $(document).ready(function(){
 
     my ($can_one,$can_two,$can_three) = check_for_available_install_options();
     print qq{  <input type="hidden" name="docroot" value="$DOCROOT" />};
+    print qq{  <input type="hidden" name="baseurl" value="$BASEURL" />};
     print qq{  <input type="hidden" name="cgibin" value="$CGIBIN" />};
-    print qq{  <input type="hidden" name="mtstatic" value="$MTSTATIC" />};
+    print qq{  <input type="hidden" name="cgibinurl" value="$CGIBINURL" />};
 
    print q{  <h2>And an install option</h2>};
     print q{  <ul class="install_opt">};
@@ -486,6 +502,142 @@ $(document).ready(function(){
     print q{  </ul>};
     print q{  <p><input type="submit" name="submit" value="Next" /></p>};
     print q{</form>};
+}
+
+sub prompt_for_db_info {
+    my $Q = new CGI;
+    print q{<form action="mt-install.cgi">};
+    print q{  <h2>Database time</h2>};
+
+    print qq{  <input type="hidden" name="type" value="$TYPE" />};
+    print qq{  <input type="hidden" name="folder" value="$FOLDER" />};
+    print qq{  <input type="hidden" name="docroot" value="$DOCROOT" />};
+    print qq{  <input type="hidden" name="baseurl" value="$BASEURL" />};
+    print qq{  <input type="hidden" name="cgibin" value="$CGIBIN" />};
+    print qq{  <input type="hidden" name="cgibinurl" value="$CGIBINURL" />};
+
+    print q{  <ul class="db-info">};
+    print q{    <li class="pkg"><label>Database Host: <input type="text" id="dbhost" name="dbhost" value="localhost" size="40" /></label></li>};
+    print q{    <li class="pkg"><label>Database User: <input type="text" id="dbuser" name="dbuser" value="" size="40" /></label></li>};
+    print q{    <li class="pkg"><label>Database Password: <input type="password" id="dbpass" name="dbpass" value="" size="40" /></label></li>};
+    print q{    <li class="pkg"><label>Database Name: <input type="text" id="dbname" name="dbname" value="movabletype" size="40" /></label></li>};
+    print q{  </ul>};
+    print q{  <p><input type="submit" name="submit" value="Next" /></p>};
+    print q{</form>};
+}
+
+sub _cgi_server_path {
+    my $path = MT->instance->server_path() || "";
+    $path =~ s!/*$!!;
+    return $path;
+}
+
+sub _static_file_path {
+    my $cfg = MT::ConfigMgr->instance;
+    my $path = $cfg->StaticFilePath;
+    if (!$path) {
+        $path = MT->instance->{mt_dir};
+        $path .= '/' unless $path =~ m!/$!;
+        $path .= 'mt-static/';
+    }
+    $path .= '/' unless $path =~ m!/$!;
+    return $path;
+}
+
+sub prompt_for_upgrade {
+    use File::Find;
+    my $installs;
+    find(sub {
+	if ($File::Find::name =~ /mt-config.cgi$/) {
+	    $installs->{$File::Find::dir}->{ok} = 1;
+	    $installs->{$File::Find::dir}->{app} = $File::Find::dir;
+	    $installs->{$File::Find::dir}->{static} = eval q{
+		BEGIN { 
+                  unshift @INC, File::Spec->catdir($File::Find::dir, "lib");
+                  unshift @INC, File::Spec->catdir($File::Find::dir, "extlib"); 
+                  #print join('<br>',@INC);
+                }
+                require MT;
+                $ENV{MT_HOME} = $File::Find::dir;
+                my $mt = MT->new;
+                $mt->init_config( {
+                    Config => $File::Find::name, 
+                    Directory => $File::Find::dir,
+                });
+                my $path = $mt->static_file_path;
+		#debug("cgi path: $File::Find::dir<br>static path: $path");
+                shift @INC; shift @INC;
+                delete $mt->{__static_file_path};
+                return $path;
+	    };
+	}
+	 }, ( $CGIBIN, $DOCROOT) );
+    foreach my $dir (keys %$installs) {
+#	debug("Found in ".$dir);
+	find(sub {
+	    if (!-w $File::Find::name) {
+#		debug($File::Find::name . " is not writable.");
+		$installs->{$dir}->{ok} = 0;
+	    }
+	     }, ($dir) );
+    }
+    my @dirs = sort keys %$installs;
+    if ($#dirs > 0) {
+	print q{
+<script type="text/javascript">
+$(document).ready(function(){
+  $('.impossible input').attr('disabled',true);
+});
+</script>
+        };
+	print q{<form action="mt-install.cgi">};
+	print q{  <h2>What do you want to do?</h2>};
+	print qq{  <input type="hidden" id="docroot" name="docroot" value="$DOCROOT" />};
+	print qq{  <input type="hidden" name="baseurl" value="$BASEURL" />};
+	print qq{  <input type="hidden" id="cgibin" name="cgibin" value="$CGIBIN" />};
+	print qq{  <input type="hidden" name="cgibinurl" value="$CGIBINURL" />};
+	print qq{  <input type="hidden" id="static" name="static" value="" />};
+	print q{  <p>I have found a copy of Open Melody already installed on your system. Do you want to upgrade an existing install, or install a brand new copy?</p>};
+	print q{  <ul class="upgrade_opt">};
+	print q{    <li class="pkg"><label><input type="radio" name="upgrade" value="" checked /> Install a new instance of Open Melody</label></li>};
+	foreach my $dir (@dirs) {
+	    print qq{    <li class="pkg }.($installs->{$dir}->{ok} ? "possible" : "impossible").qq{"><label><input type="radio" name="upgrade" value="$dir" onclick="\$('cgibin').val('$installs->{$dir}->{app}'); \$('static').val('$installs->{$dir}->{static}');" /> $dir</label>};
+	    if (!$installs->{$dir}->{ok}) {
+		print qq{ <a href="">Fix me</a>};
+	    }
+	    print qq{</li>};
+	}
+	print q{  </ul>};
+	
+	print q{  <p><input type="submit" name="submit" value="Next" /></p>};
+	print q{</form>};
+    } else {
+	# skip to the next step
+	$UPGRADE = "";
+	prompt_for_mthome();
+    }
+}
+
+sub write_config {
+    my ($dest,$cgi,$static) = @_;
+    my $Q = new CGI;
+    open CONFIG,">$dest";
+    print CONFIG <<EOC;
+# Open Melody configuration file
+# This file defines system-wide settings for Movable Type
+
+# The CGIPath is the URL to your Movable Type directory
+CGIPath $cgi
+StaticWebPath $static
+
+# Database
+ObjectDriver DBI::mysql
+Database $DBNAME
+DBHost $DBHOST
+DBUser $DBUSER
+EOC
+    print "DBPassword $DBPASS\n" if $DBPASS && $DBPASS ne '';
+    close CONFIG;
 }
 
 sub prompt_for_file_paths {
@@ -539,9 +691,10 @@ sub check_for_available_install_options {
 sub prompt_for_install_option() {
     my ($can_one,$can_two,$can_three) = check_for_available_install_options();
     print q{<form action="mt-install.cgi">};
-    print q{  <input type="hidden" name="docroot" value="$DOCROOT" />};
-    print q{  <input type="hidden" name="cgibin" value="$CGIBIN" />};
-    print q{  <input type="hidden" name="mtstatic" value="$MTSTATIC" />};
+    print qq{  <input type="hidden" name="docroot" value="$DOCROOT" />};
+    print qq{  <input type="hidden" name="baseurl" value="$BASEURL" />};
+    print qq{  <input type="hidden" name="cgibin" value="$CGIBIN" />};
+    print qq{  <input type="hidden" name="cgibinurl" value="$CGIBINURL" />};
     print q{  <ul class="install_opt">};
     print q{    <li class="pkg }.($can_one ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="1" /> Install all of Open Melody in cgi-bin</label></li>};
     print q{    <li class="pkg }.($can_two ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="2" /> Install all of Open Melody in document root</label></li>};
@@ -610,10 +763,14 @@ sub cgibin_can_serve_static_files {
 sub main {
     if (!$DOCROOT || !$CGIBIN) {
 	prompt_for_file_paths();
+    } elsif ($UPGRADE == undef) {
+	prompt_for_upgrade();
     } elsif (!$FOLDER) {
 	prompt_for_mthome();
     } elsif (!$TYPE) {
 	prompt_for_install_option();
+    } elsif (!$DBNAME) {
+	prompt_for_db_info();
     } else {
 	prerequisites_check();
 	download_openmelody();
