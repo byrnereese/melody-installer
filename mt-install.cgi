@@ -125,9 +125,11 @@ use constant MODULE_LOAD_COND_URL
 use constant MODULE_LOAD_URL
     => 'http://cpansearch.perl.org/src/KANE/Module-Load-0.16/lib/Module/Load.pm';
 
+my $JSON      = param('json');
 my $TYPE      = param('type');
 my $FOLDER    = param('folder');
 my $UPGRADE   = param('upgrade');
+my $OK        = param('proceed');
 
 my $DOCROOT   = param('docroot');
 my $BASEURL   = param('baseurl');
@@ -211,10 +213,6 @@ my @CORE_OPT = (
 );
 
 
-print_header();
-main();
-print_footer();
-
 sub is_cgibin_writable {
    if (!-w $CGIBIN) {
 	chmod 0775, $CGIBIN;
@@ -254,7 +252,7 @@ sub permissions_check {
     return 1;
 }
 
-sub prerequisites_check {
+sub prompt_for_prereqs {
     for my $list (\@CORE_REQ, \@CORE_DATA, \@CORE_OPT) {
 	my $data = ($list == \@CORE_DATA);
 	my $req = ($list == \@CORE_REQ);
@@ -290,9 +288,26 @@ sub download_dep {
     $down->download($url);
 }
 
-sub download_openmelody {
+sub get_install_destination {
+    my ($app,$static);
+    if ($TYPE == 1) {
+	# all in cgi-bin
+	$app    = File::Spec->catdir($CGIBIN, $FOLDER);
+	$static = File::Spec->catdir($CGIBIN, $FOLDER, 'mt-static');
+    } elsif ($TYPE == 2) {
+	# all in docroot
+	$app    = File::Spec->catdir($DOCROOT, $FOLDER);
+	$static = File::Spec->catdir($DOCROOT, $FOLDER, 'mt-static');
+    } elsif ($TYPE == 3) {
+	$app    = File::Spec->catdir($CGIBIN, $FOLDER);
+	$static = File::Spec->catdir($DOCROOT, 'mt-static');
+    }
+    return ($app, $static);
+}
+
+sub install {
     eval 'use Archive::Extract';
-    $Archive::Extract::DEBUG = 1;
+#    $Archive::Extract::DEBUG = 1;
     my $dir = make_tmpdir();
     if ($@) {
 	# download each file separately
@@ -440,68 +455,95 @@ sub docroot_can_serve_cgi {
 
 sub prompt_for_mthome {
     my $Q = new CGI;
-    print qq{
+    # TODO - this will be an AJAX call
+    return check_install_options();
+}
+
+sub prompt_for_mthome_html {
+    my ($options)   = @_;
+    my $can_one     = $options->{types}->{1}->{ok};
+    my $can_two     = $options->{types}->{2}->{ok};
+    my $can_three   = $options->{types}->{3}->{ok};
+    my $can_install = $can_one || $can_two || $can_three;
+    my $html;
+    $html .= qq{
 <script type="text/javascript">
-var cgibin = "$CGIBIN";
-var baseurl = "$BASEURL";
+var cgibin  = "$CGIBINURL";
+var docroot = "$BASEURL";
+var baseurl;
 }.q{
+function change_urls(e) {
+  if ( $(e).val() == 1 ) {
+     $('#folder-static').fadeOut('fast');
+     $('#url-static').fadeOut('fast');
+     baseurl = cgibin;
+  } else if ( $(e).val() == 2 ) {
+     $('#folder-static').fadeOut('fast');
+     $('#url-static').fadeOut('fast');
+     baseurl = docroot;
+  } else if ( $(e).val() == 3 ) {
+     $('#folder-static').fadeIn('fast');
+     $('#url-static').fadeIn('fast');
+     baseurl = cgibin;
+  }
+  var url = baseurl + $('#folder-mthome input').val() + '/mt.cgi';
+  $('#mthome').val( url );
+}
 $(document).ready(function(){
-  $('#folder').keypress(function() {
-    var folder = $('#folder').val();
-    $('#mthome').val( cgibin + folder + "/mt.cgi"); 
-    $('#mtstatic').val( baseurl + folder + "/mt-static/"); 
+  $('.folder').bind('change keyup', function() {
+    var app = $('#folder-mthome input').val();
+    var static = $('#folder-static input').val();
+    $('#url-mthome input').val( baseurl + app + "/mt.cgi" );
+    $('#url-static input').val( baseurl + static + '/' ); 
   });
-  $('.install-type').click(function() {
-    var id = $(this).attr('id');
-    $('.folder').fadeOut('fast',function() {
-      if (id.toString() == "type1") {
-        $('#folder-mthome.folder').fadeIn('fast');
-      } else if (id == "type2") {
-        $('#folder-docroot').fadeIn('fast');
-      } else if (id == "type3") {
-        $('#folder-mthome').fadeIn('fast');
-        $('#folder-mtstatic').fadeIn('fast');
-      } else {
-        alert("this shouldn't happen");
-      }
-    });
-  });
-  $('.impossible input').attr('disabled',true);
-  $('.install_opt li').each(function(i,e){ 
-     if ($("#" + this.id + ' input').attr('disabled') != true) {
-       $('#' + this.id + ' input').attr('checked', true);
-       return;
+  var selected = 0;
+  $('.install-type').each(function(i,e){ 
+     if ($("#" + this.id).hasClass('impossible')) {
+       $('#' + this.id + ' input').attr('disabled', true);
+     } else {
+       if (!selected) {
+         $('#' + this.id + ' input').attr('checked', true).trigger('click');
+         selected = this.id;
+       }
      }
   });
 });
 </script>
-    };
-    print q{<form action="mt-install.cgi">};
-    print q{  <h2>Time to pick a folder name</h2>};
-    print q{  <p>Give the folder you are going to Open Melody a name:</p>};
-    print q{  <ul class="folder-name">};
-    print q{    <li class="pkg"><label>Folder: <input type="text" id="folder" name="folder" value="mt" size="40" /></label></li>};
-    print q{  </ul>};
+<form action="mt-install.cgi">
+};
+    $html .= qq{  <input type="hidden" name="upgrade" value="$UPGRADE" />};
+    $html .= qq{  <input type="hidden" name="docroot" value="$DOCROOT" />};
+    $html .= qq{  <input type="hidden" name="baseurl" value="$BASEURL" />};
+    $html .= qq{  <input type="hidden" name="cgibin" value="$CGIBIN" />};
+    $html .= qq{  <input type="hidden" name="cgibinurl" value="$CGIBINURL" />};
 
-    my ($can_one,$can_two,$can_three) = check_for_available_install_options();
-    print qq{  <input type="hidden" name="docroot" value="$DOCROOT" />};
-    print qq{  <input type="hidden" name="baseurl" value="$BASEURL" />};
-    print qq{  <input type="hidden" name="cgibin" value="$CGIBIN" />};
-    print qq{  <input type="hidden" name="cgibinurl" value="$CGIBINURL" />};
+    $html .= q{  <h2>Choose an install option</h2>};
+    $html .= q{  <ul class="install_opt">};
+    $html .= q{    <li id="type1" class="install-type pkg }.($can_one ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="1" onclick="change_urls(this);" /> Install all of Open Melody in cgi-bin</label> }.(!$can_one ? '<a href="#" id="fixme-1" class="fixme install-1">Fix me</a>' : '').q{</li>};
+    $html .= q{    <li id="type2" class="install-type pkg }.($can_two ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="2" onclick="change_urls(this);" /> Install all of Open Melody in document root</label> }.(!$can_two ? '<a href="#" id="fixme-2" class="fixme install-2">Fix me</a>' : '').q{</li>};
+    $html .= q{    <li id="type3" class="install-type pkg }.($can_three ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="3" onclick="change_urls(this);" /> Install app files in cgi-bin, and static files in document root</label> }.(!$can_three ? '<a href="#" id="fixme-3" class="fixme install-3">Fix me</a>' : '').q{</li>};
+    $html .= q{  </ul>};
 
-   print q{  <h2>And an install option</h2>};
-    print q{  <ul class="install_opt">};
-    print q{    <li id="type1" class="install-type pkg }.($can_one ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="1" /> Install all of Open Melody in cgi-bin</label> }.(!$can_one ? '<a href="#">Fix me</a>' : '').q{</li>};
-    print q{    <li id="type2" class="install-type pkg }.($can_two ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="2" /> Install all of Open Melody in document root</label> }.(!$can_two ? '<a href="#">Fix me</a>' : '').q{</li>};
-    print q{    <li id="type3" class="install-type pkg }.($can_three ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="3" /> Install app files in cgi-bin, and static files in document root</label> }.(!$can_three ? '<a href="#">Fix me</a>' : '').q{</li>};
-    print q{  </ul>};
-    print q{  <ul class="folder">};
-     print qq{    <li id="folder-mthome" class="pkg wrap folder"><label for="mthome">URL to Open Melody Admin:</label><input type="text" id="mthome" name="mthome" size="40" value="${CGIBINURL}mt/mt.cgi" /></li>};
-    print qq{    <li id="folder-mtstatic" class="pkg wrap folder"><label for="mtstatic">URL to Static Content:</label><input type="text" id="mtstatic" name="mtstatic" size="40" value="${BASEURL}mt-static/" /></li>};
-    print qq{    <li id="folder-docroot" class="pkg wrap folder"><label for="docroot">URL to Open Melody:</label><input type="text" id="mtstatic" name="mtstatic" size="40" value="${BASEURL}mt/mt.cgi" /></li>};
-    print q{  </ul>};
-    print q{  <p><input type="submit" name="submit" value="Next" /></p>};
-    print q{</form>};
+    if ($can_install) {
+	$html .= q{  <h2>Where do you want to install this puppy?</h2>};
+	$html .= q{  <ul class="folders">};
+	$html .= q{    <li id="folder-mthome" class="pkg folder"><label>Folder to install application: <input type="text" name="folder" value="mt" size="40" /></label></li>};
+	$html .= q{    <li id="folder-static" class="pkg folder" style="display:none;"><label>Folder to install css and javascript files: <input type="text" name="folder-static" value="mt-static" size="40" /></label></li>};
+	$html .= q{  </ul>};
+	
+	$html .= q{  <ul class="urls">};
+	$html .= qq{    <li id="url-mthome" class="pkg wrap url"><label for="mthome">URL to Open Melody Admin:</label><input type="text" id="mthome" name="mthome" size="40" value="" /></li>};
+	
+	$html .= qq{    <li id="url-static" class="pkg wrap url" style="display: none"><label for="mtstatic">URL to Static Content:</label><input type="text" id="mtstatic" name="mtstatic" size="40" value="" /></li>};
+	$html .= q{  </ul>};
+	
+	$html .= q{  <p><input type="submit" name="submit" value="Next" /></p>};
+	$html .= q{</form>};
+    } else {
+	$html .= q{<p>It looks like your system is not ready yet. To install Open Melody try to fix one of the options above. Click "Fix me" for help.</p>};
+	$html .= q{<button id="tryagain">Try Again</button>};
+    }
+    return $html;
 }
 
 sub prompt_for_db_info {
@@ -544,7 +586,7 @@ sub _static_file_path {
     return $path;
 }
 
-sub prompt_for_upgrade {
+sub find_installs {
     use File::Find;
     my $installs;
     find(sub {
@@ -572,50 +614,112 @@ sub prompt_for_upgrade {
 	    };
 	}
 	 }, ( $CGIBIN, $DOCROOT) );
-    foreach my $dir (keys %$installs) {
-#	debug("Found in ".$dir);
+    foreach my $dir ( sort keys %$installs ) {
 	find(sub {
-	    if (!-w $File::Find::name) {
-#		debug($File::Find::name . " is not writable.");
-		$installs->{$dir}->{ok} = 0;
-	    }
+	    $installs->{$dir}->{ok} = 0 if (!-w $File::Find::name);
 	     }, ($dir) );
     }
+    return $installs;
+}
+
+sub prompt_for_upgrade_html {
+    my ($installs) = @_;
     my @dirs = sort keys %$installs;
-    if ($#dirs > 0) {
-	print q{
+    my $html;
+    $html .= q{<form action="mt-install.cgi">};
+    $html .= q{  <h2>What do you want to do?</h2>};
+#    $html .= qq{  <input type="hidden" id="docroot" name="docroot" value="$DOCROOT" />};
+#    $html .= qq{  <input type="hidden" name="baseurl" value="$BASEURL" />};
+#    $html .= qq{  <input type="hidden" id="cgibin" name="cgibin" value="$CGIBIN" />};
+#    $html .= qq{  <input type="hidden" name="cgibinurl" value="$CGIBINURL" />};
+#    $html .= qq{  <input type="hidden" id="static" name="static" value="" />};
+    $html .= q{  <p>I have found a copy of Open Melody already installed on your system. Do you want to upgrade an existing install, or install a brand new copy?</p>};
+    $html .= q{  <ul class="upgrade_opt">};
+    $html .= q{    <li class="pkg"><label><input type="radio" name="upgrade" value="no" checked /> Install a new instance of Open Melody</label></li>};
+    foreach my $dir (@dirs) {
+	$html .= qq{    <li class="pkg }.($installs->{$dir}->{ok} ? "possible" : "impossible").qq{"><label><input type="radio" name="upgrade" value="$dir" onclick="\$('cgibin').val('$installs->{$dir}->{app}'); \$('static').val('$installs->{$dir}->{static}');" /> $dir</label>};
+	if (!$installs->{$dir}->{ok}) {
+	    $html .= qq{ <a href="#" class="fixme upgrade-opt" title="$dir">Fix me</a>};
+	}
+	$html .= qq{</li>};
+    }
+    $html .= q{  </ul>};
+    $html .= q{  <p><input type="submit" name="submit" value="Next" /></p>};
+    $html .= q{</form>};
+    return $html;
+}
+
+sub prompt_for_upgrade {
+    print qq{
 <script type="text/javascript">
-$(document).ready(function(){
-  $('.impossible input').attr('disabled',true);
+var cgibin = "$CGIBIN";
+var docroot = "$DOCROOT";
+}.q{$(document).ready(function(){
+  $('#upgrade').html('<img src="http://localhost/~breese/mt/mt-static/images/indicator.gif" />');
+  $.post('mt-install.cgi', 
+         { 
+           'json'    : 'find_installs',
+           'cgibin'  : cgibin,
+           'docroot' : docroot 
+         },
+         function(data){
+           $('#upgrade').html('');
+           $('#upgrade').html(data.html);
+           $('li.impossible input').attr('disabled',true);
+           $('.fixme').click(function(){ 
+             var html = '';
+             if ($(this).hasClass('install-1')) {
+               html = "<p>We encountered the following problems when trying to install Open Melody into your <code>cgi-bin</code> directory:</p><ul>";
+               var resolve = "";
+               if (!data.options.types[1].directory) {
+                 html += "<li>The path you specified for your cgi-bin is not a directory.</li>";
+                 resolve += "<li>Connect to your web server and create the directory:<br><code>" + data.options.cgibin + "</code></li>";
+               } else {
+                 if (!data.options.types[1].writable) {
+                   html += "<li>The cgi-bin directory you identified is not writable.</li>";
+                 }              
+                 if (!data.options.types[1].exists) {
+                   html += "<li>The path you specified does not exist. (TODO - fix me)</li>";
+                 }              
+               }
+               if (!data.options.types[1].static_ok) {
+                 html += "<li>The cgi-bin directory you identified is unable to serve static files like javascript, css or HTML.</li>";
+               }              
+               html += "</ul><h4>How to resolve the problem</h4><ul>";
+               html += resolve;
+               html += "</ul>";
+             } else if ($(this).hasClass('install-2')) {
+               html = "<p>We encountered the following problems when trying to install Open Melody into your document root:</p><ul>";
+               var resolve = "";
+               if (!data.options.types[2].directory) {
+                 html += "<li>The path you specified for your document root is not a directory.</li>";
+                 resolve += "<li>Connect to your web server and create the directory:<br><code>" + data.options.docroot + "</code></li>";
+               } else {
+                 if (!data.options.types[2].writable) {
+                   html += "<li>The directory you identified is not writable.</li>";
+                 }              
+                 if (!data.options.types[2].exists) {
+                   html += "<li>The path you specified does not exist. (TODO - fix me)</li>";
+                 }              
+               }
+               if (!data.options.types[2].htaccess_ok) {
+                 html += "<li>The document root you specified is not capable of serving CGI applications.</li>";
+               }              
+               html += "</ul><h4>How to resolve the problem</h4><ul>";
+               html += resolve;
+               html += "</ul>";
+             } else if ($(this).hasClass('install-3')) {
+               html = '';
+             }
+             toggle_drawer($(this).attr('id'),html); 
+           });
+         },
+         "json"
+  );
 });
 </script>
-        };
-	print q{<form action="mt-install.cgi">};
-	print q{  <h2>What do you want to do?</h2>};
-	print qq{  <input type="hidden" id="docroot" name="docroot" value="$DOCROOT" />};
-	print qq{  <input type="hidden" name="baseurl" value="$BASEURL" />};
-	print qq{  <input type="hidden" id="cgibin" name="cgibin" value="$CGIBIN" />};
-	print qq{  <input type="hidden" name="cgibinurl" value="$CGIBINURL" />};
-	print qq{  <input type="hidden" id="static" name="static" value="" />};
-	print q{  <p>I have found a copy of Open Melody already installed on your system. Do you want to upgrade an existing install, or install a brand new copy?</p>};
-	print q{  <ul class="upgrade_opt">};
-	print q{    <li class="pkg"><label><input type="radio" name="upgrade" value="" checked /> Install a new instance of Open Melody</label></li>};
-	foreach my $dir (@dirs) {
-	    print qq{    <li class="pkg }.($installs->{$dir}->{ok} ? "possible" : "impossible").qq{"><label><input type="radio" name="upgrade" value="$dir" onclick="\$('cgibin').val('$installs->{$dir}->{app}'); \$('static').val('$installs->{$dir}->{static}');" /> $dir</label>};
-	    if (!$installs->{$dir}->{ok}) {
-		print qq{ <a href="">Fix me</a>};
-	    }
-	    print qq{</li>};
-	}
-	print q{  </ul>};
-	
-	print q{  <p><input type="submit" name="submit" value="Next" /></p>};
-	print q{</form>};
-    } else {
-	# skip to the next step
-	$UPGRADE = "";
-	prompt_for_mthome();
-    }
+    };
+    print q{<div id="upgrade"></div>};
 }
 
 sub write_config {
@@ -674,34 +778,44 @@ $(document).ready(function(){
     print q{</form>};
 }
 
-sub check_for_available_install_options {
-    my $can_one = 
-	is_cgibin_writable() && 
-	cgibin_can_serve_static_files();
-    my $can_two = 
-	is_docroot_writable() &&
-	docroot_can_serve_cgi() &&
-	check_htaccess_and_cgi();
-    my $can_three = 
-	is_cgibin_writable() && 
-	is_docroot_writable();
-    return ($can_one,$can_two,$can_three);
-}
+sub check_install_options {
+    my $options = {
+	cgibin => $CGIBIN,
+	docroot => $DOCROOT,
+    };
+    # Type 1: All in cgi-bin
+    $options->{types}->{1}->{writable}  = is_cgibin_writable();
+    $options->{types}->{1}->{exists}    = (-e $CGIBIN);
+    $options->{types}->{1}->{directory} = (-d $CGIBIN);
+    $options->{types}->{1}->{static_ok} = cgibin_can_serve_static_files();
+    $options->{types}->{1}->{ok} = 
+	$options->{types}->{1}->{writable} && 
+	$options->{types}->{1}->{directory} && 
+	$options->{types}->{1}->{static_ok};
 
-sub prompt_for_install_option() {
-    my ($can_one,$can_two,$can_three) = check_for_available_install_options();
-    print q{<form action="mt-install.cgi">};
-    print qq{  <input type="hidden" name="docroot" value="$DOCROOT" />};
-    print qq{  <input type="hidden" name="baseurl" value="$BASEURL" />};
-    print qq{  <input type="hidden" name="cgibin" value="$CGIBIN" />};
-    print qq{  <input type="hidden" name="cgibinurl" value="$CGIBINURL" />};
-    print q{  <ul class="install_opt">};
-    print q{    <li class="pkg }.($can_one ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="1" /> Install all of Open Melody in cgi-bin</label></li>};
-    print q{    <li class="pkg }.($can_two ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="2" /> Install all of Open Melody in document root</label></li>};
-    print q{    <li class="pkg }.($can_three ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="3" /> Install app files in cgi-bin, and static files in document root</label></li>};
-    print q{  </ul>};
-    print q{  <p><input type="submit" name="submit" value="Next" /></p>};
-    print q{</form>};
+    # Type 2: All in docroot
+    $options->{types}->{2}->{writable} = is_docroot_writable();
+    $options->{types}->{2}->{cgi_ok} = docroot_can_serve_cgi();
+    $options->{types}->{2}->{exists}    = (-e $DOCROOT);
+    $options->{types}->{2}->{directory} = (-d $DOCROOT);
+    $options->{types}->{2}->{htaccess_ok} = check_htaccess_and_cgi();
+    $options->{types}->{2}->{ok} = 
+	$options->{types}->{2}->{writable} && 
+	$options->{types}->{2}->{cgi_ok} && 
+	$options->{types}->{2}->{htaccess_ok};
+
+    # Type 3: Hybrid
+    $options->{types}->{3}->{cgi_writable} = is_cgibin_writable();
+    $options->{types}->{3}->{docroot_writable} = is_docroot_writable();
+    $options->{types}->{3}->{cgi_exists} = (-e $CGIBIN);
+    $options->{types}->{3}->{docroot_exists} = (-e $DOCROOT);
+    $options->{types}->{3}->{cgi_directory} = (-d $CGIBIN);
+    $options->{types}->{3}->{docroot_directory} = (-d $DOCROOT);
+    $options->{types}->{3}->{ok} = 
+	$options->{types}->{3}->{cgi_writable} && 
+	$options->{types}->{3}->{docroot_writable};
+
+    return $options;
 }
 
 sub debug {
@@ -760,20 +874,56 @@ sub cgibin_can_serve_static_files {
     return 1;
 }
 
+if ($JSON) {
+    print header("application/json");
+    if ($JSON eq 'find_installs') {
+	my $installs = find_installs();
+	my @dirs = sort keys %$installs;
+	if ($#dirs == -1) {
+	    # skip to the next step
+	    $UPGRADE = "";
+	    my $options = check_install_options();
+	    my $html = prompt_for_mthome_html($options);
+	    print JSON::objToJson({
+		    'options' => $options,
+		    'html' => $html,
+		});
+	} else {
+	    print JSON::objToJson({
+		    'dirs' => $installs,
+		    'html' => prompt_for_upgrade_html($installs),
+		});
+	}
+    } elsif ($JSON eq 'check_install') {
+	my $options = check_install_options();
+	my $html = prompt_for_mthome_html($options);
+	print JSON::objToJson({
+	    'options' => $options,
+	    'html' => $html,
+	});
+    }
+} else {
+    print_header();
+    main();
+    print_footer();
+}
+
 sub main {
     if (!$DOCROOT || !$CGIBIN) {
 	prompt_for_file_paths();
-    } elsif ($UPGRADE == undef) {
+    } elsif (!$UPGRADE) {
 	prompt_for_upgrade();
-    } elsif (!$FOLDER) {
-	prompt_for_mthome();
-    } elsif (!$TYPE) {
-	prompt_for_install_option();
-    } elsif (!$DBNAME) {
+    } elsif (!$FOLDER && $UPGRADE eq "no") {
+	my ($options, $html) = prompt_for_mthome();
+	print $html;
+    } elsif (!$OK && $UPGRADE eq "no") {
+	if (-e $FOLDER) {
+	}
+	prompt_for_prereqs();
+    } elsif (!$DBNAME && $UPGRADE eq "no") {
 	prompt_for_db_info();
     } else {
-	prerequisites_check();
-	download_openmelody();
+	install();
     }
 }
 
@@ -787,11 +937,103 @@ sub print_header {
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     <title>Open Melody Installer</title>
+    <script type="text/javascript" src="http://localhost/~breese/mt-byrne/mt-static/jquery/jquery.js"></script>
+<!--
     <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.3/jquery.min.js"></script>
+-->
+EOH
+    $html .= q{
+    <script type="text/javascript">
+var open_drawer_is = 0;
+var is_animating = 0;
+function toggle_drawer(opener,new_html) {
+  if (open_drawer_is == 0) { 
+    $('#drawer-content').html(new_html);
+    open_drawer(); 
+    open_drawer_is = opener;
+  } else if (open_drawer_is != 0) { 
+    if (open_drawer_is == opener) {
+      close_drawer(); 
+      open_drawer_is = 0;
+    } else {
+      close_drawer(); 
+      $('#drawer-content').html(new_html);
+      open_drawer(); 
+      open_drawer_is = opener;
+    }
+  }
+}
+function open_drawer() {
+  var getWidth = $('#container-inner').width();
+  is_animating = 1;
+  $('#drawer').animate({ left: getWidth }, 500, function(){
+    $('#drawer').css({ 'z-index':'100' });
+    is_animating = 0;
+  });
+}
+function close_drawer() {
+  is_animating = 1;
+  $('#drawer').css({ 'z-index':'-1' });
+  $('#drawer').animate({ left: 15 }, 500, function(){
+    is_animating = 0;
+    drawer_is = 0;
+  });
+}
+$(document).ready(function(){
+    $('.close').click(function(){ close_drawer(); });
+    $('#drawer').show();
+});
+    </script>
+};
+    $html .= <<EOH;
     <style>
 body {
   font-family: Georgia;
   }
+#container{
+  margin: 50px auto 0;
+  text-align: left;
+  width:360px;
+  position: relative;
+  }
+#container-inner{
+  border: 1px solid #cfdde5;
+  background-image: url('http://localhost/~breese/mt/mt-static/images/chromeless/chromeless_bg_b.png');
+  background-repeat: repeat-x;
+  background-position: bottom center; 
+  background-color: white;
+  z-index: 1;
+min-height: 360px;
+  }
+#drawer { 
+  position: absolute;
+  top: 10px;
+  border: 1px solid #CFDDEF; 
+  width: 293px; 
+  height: 318px; 
+  padding: 15px;
+  background: white;
+  z-index: -1;
+ display:none;
+  }
+#drawer a {
+  position: absolute;
+  display: block;
+  top: 10px;
+  right: 10px;
+  }
+#drawer h4 { font-weight: bold; margin-bottom: 8px; }
+#drawer-title {
+  font-size: 1.3em;
+  font-weight: bold;
+  margin-bottom: 10px;
+  }
+#drawer-content {
+  font-size: 1.1em;
+  }
+#upgrade { text-align: center; }
+#upgrade form { text-align: left; }
+
 ul.paths li label {
   display: block;
   width: 125px;
@@ -810,7 +1052,7 @@ ul {
   }
 #container form li {
   list-style: none;
-  margin-left: 0;
+ margin-left: 0;
   margin-bottom: 10px;
   padding-left: 0;
   }
@@ -820,8 +1062,6 @@ input#mtstatic {
   background: transparent;
   font-family:courier;
 }
-
-
 .pkg:after {
       content: " ";
       display: block;
@@ -838,14 +1078,14 @@ input#mtstatic {
 .msg-publishing{background-image:url('http://localhost/~breese/mt/mt-static/images/ani-rebuild.gif');}
 .msg a.close-me{background:transparent url('http://localhost/~breese/mt/mt-static/images/icon_close.png') no-repeat scroll 3px 4px;}
 
-#container-inner{background:url('http://localhost/~breese/mt/mt-static/images/chromeless/chromeless_bg_b.png') repeat-x bottom center;}
 #nav .step{background:url('http://localhost/~breese/mt/mt-static/images/chromeless/nav_off.png');}
 #nav .step_active{background:url('http://localhost/~breese/mt/mt-static/images/chromeless/nav_on.png');}
 
 
 /* Begin Simple CSS */
 /* Movable Type (r) (C) 2001-2009 Six Apart, Ltd. All Rights Reserved
- * This file is combined from multiple sources.  Consult the source files for their
+ * This file is combined from multiple sources.  
+ * Consult the source files for their
  * respective licenses and copyrights.
  */
 :link,:visited{text-decoration:none;}html,body,div,
@@ -862,20 +1102,50 @@ h1,h2,h3,h4,h5,h6{font-size:100%;font-weight:normal;}table{border-spacing:0;}fie
 .rebuilding-screen .msg-info a.close-me,
 .pinging-screen .msg-info a.close-me,
 .list-notification .msg-info a.close-me,
-    .zero-state a.close-me{display:none;}.debug-panel{width:100%;border-top:1px dotted #f55;margin-top:5px;background-color:#daa;text-align:left;}.debug-panel h3{padding:5px;font-size:12px;margin:0;background-color:#f55;color:#fff;}.debug-panel-inner li{white-space:pre;}.debug-panel-inner li:hover{background-color:#eaa;}.debug-panel-inner{padding:5px;font-family:'Andale Mono', monospace;font-size:10px;max-height:200px;overflow:auto;}body{font-family:"Helvetica Neue", Helvetica, Arial, sans-serif;font-size:12px;background-color:#fff;}
+.zero-state a.close-me{display:none;}
+.debug-panel{width:100%;border-top:1px dotted #f55;margin-top:5px;background-color:#daa;text-align:left;}
+.debug-panel h3{padding:5px;font-size:12px;margin:0;background-color:#f55;color:#fff;}
+.debug-panel-inner li{white-space:pre;}
+.debug-panel-inner li:hover{background-color:#eaa;}
+.debug-panel-inner{padding:5px;font-family:'Andale Mono', monospace;font-size:10px;max-height:200px;overflow:auto;}
+body{font-family:"Helvetica Neue", Helvetica, Arial, sans-serif;font-size:12px;background-color:#fff;}
 h1, h2, p, ul{margin-bottom:12px;}
 h2{font-weight:bold;font-size:14px;}
-strong{font-weight:bold;}em{font-style:italic;}a:link,
-a:visited{color:#33789c;}a:hover,
-a:active{color:#a2ad00;}#container{margin:50px auto 0;text-align:left;width:360px;}.ready{font-weight:bold;color:#93b06b;}.note{clear:both;padding:10px 0 10px 0;}#page-title{font-size:24px;font-weight:normal;margin-top:10px;}p.intro{font-size:14px;font-weight:normal;}.hint{line-height:1.1;font-size:11px;padding-top:2px;}#db_hint{margin-top:-10px;margin-bottom:10px;}#db_hint p{margin-bottom:3px;}#error_more{margin:10px 0 15px;font-weight:normal;overflow:auto;padding:5px 0 10px 0;}#continue{margin-bottom:20px;}.module-name{font-weight:bold;}.module-name a{color:black;text-decoration:none;}.module-name a:hover{text-decoration:underline;}#brand{position:relative;margin:30px 0 0 20px;height:34px;width:192px;font-size:32px;font-family:Helvetica;font-weight: bold;}#container-inner{border:1px solid #cfdde5;}#content #content-inner{margin:0 18px;}#nav{float:right;margin-right:20px;}#nav .step{float:left;height:15px;width:14px;}#nav .step_active{float:left;height:15px;width:14px;}.edit-entry .actions-bar-top,.edit-entry .actions-bar-bottom{display:none;}#container.show-actions-bar-top .actions-bar-top{display:block;}#container.show-actions-bar-bottom .actions-bar-bottom{display:block;}ul li{list-style-type:disc;margin-left:15px;}fieldset{margin:0;}.field{border:0;mat-weight:bold;margin-boctions-bar .plugin-actions button{width:auto;overflow:visible;}.buttons a:hover,
-.buttons a:active,
-.buttons button:hover,
+strong{font-weight:bold;}
+em{font-style:italic;}
+a:link,a:visited{color:#33789c;}
+a:hover,a:active{color:#a2ad00;}
+.ready{font-weight:bold;color:#93b06b;}
+.note{clear:both;padding:10px 0 10px 0;}
+#page-title{font-size:24px;font-weight:normal;margin-top:10px;}
+p.intro{font-size:14px;font-weight:normal;}
+.hint{line-height:1.1;font-size:11px;padding-top:2px;}
+#db_hint{margin-top:-10px;margin-bottom:10px;}
+#db_hint p{margin-bottom:3px;}
+#error_more{margin:10px 0 15px;font-weight:normal;overflow:auto;padding:5px 0 10px 0;}
+#continue{margin-bottom:20px;}
+.module-name{font-weight:bold;}
+.module-name a{color:black;text-decoration:none;}
+.module-name a:hover{text-decoration:underline;}
+#brand{position:relative;margin:30px 0 0 20px;height:34px;width:192px;font-size:32px;font-family:Helvetica;font-weight: bold;}
+#content #content-inner{margin:0 18px;}
+#nav{float:right;margin-right:20px;}
+#nav .step{float:left;height:15px;width:14px;}
+#nav .step_active{float:left;height:15px;width:14px;}
+.edit-entry .actions-bar-top,.edit-entry .actions-bar-bottom{display:none;}
+#container.show-actions-bar-top .actions-bar-top{display:block;}
+#container.show-actions-bar-bottom .actions-bar-bottom{display:block;}
+ul li{list-style-type:disc;margin-left:15px;}
+fieldset{margin:0;}
+.field{border:0;mat-weight:bold;margin-boctions-bar .plugin-actions button{width:auto;overflow:visible;}
+.buttons a:hover,.buttons a:active,.buttons button:hover,
 .listing .actions-bar .actions a:hover,
 .listing .actions-bar .actions a:active,
 .listing .actions-bar .actions button:hover,
 .actions-bar .plugin-actions a:hover,
 .actions-bar .plugin-actions a:active,
-.actions-bar .plugin-actions button:hover{color:#33789c !important;background-position:50% 30%;}.system .buttons a:hover,
+.actions-bar .plugin-actions button:hover{color:#33789c !important;background-position:50% 30%;}
+.system .buttons a:hover,
 .system .buttons a:active,
 .system .buttons button:hover,
 .system .listing .actions-bar .actions a:hover,
@@ -884,9 +1154,19 @@ a:active{color:#a2ad00;}#container{margin:50px auto 0;text-align:left;width:360p
 .system .actions-bar .plugin-actions a:hover,
 .system .actions-bar .plugin-actions a:active,
 .system .actions-bar .plugin-actions button:hover{color:#7f8833 !important;}
-.dialog .actions-bar{margin-bottom:10px;}.dialog .actions-bar-login .actions a,
+.dialog .actions-bar{margin-bottom:10px;}
+.dialog .actions-bar-login .actions a,
 .dialog .actions-bar-login .actions button,
-.dialog .actions-bar-login .actions select{float:left;margin:0 5px 0 0;}.upgrade .upgrade-process{overflow:auto;margin:10px 0;border:1px solid #ccc;padding:10px;background-color:#fafafa;height:200px;}.mt-config-file-path{overflow:auto;overflow-x:auto;overflow-y:hidden;height:2.75em;font-weight:bold;}ul#profile-data li{margin-left:0;padding-left:0;list-style:none;}#profile_userpic-field .field-content label{display:block;margin-top:5px;}.mt-profile-edit form{margin-bottom:.75em;}.custom-field-radio-list{margin-bottom:.25em;}.custom-field-radio-list li{list-style:none;margin-left:0;}.pkg:after{content:" ";display:block;visibility:hidden;clear:both;height:0.1px;font-size:0.1em;line-height:0;}.pkg{display:inline-block;}/*\*/* html .pkg{height:1%;}.pkg[class]{height:auto;}.pkg{display:block;}/**/.hidden{display:none !important;}.visible{display:block;}.invisible{display:block !important;visibility:hidden !important;position:absolute !important;left:0 !important;top:0 !important;width:0 !important;height:0 !important;font-size:0.1px !important;line-height:0 !important;}.overflow-auto{overflow:auto;}.overflow-hidden{overflow:hidden;}.right{float:right;}.left{float:left;display:inline;}.center{margin-left:auto;margin-right:auto;}.inline{display:inline;}.nowrap{white-space:nowrap;}
+.dialog .actions-bar-login .actions select{float:left;margin:0 5px 0 0;}
+.upgrade .upgrade-process{overflow:auto;margin:10px 0;border:1px solid #ccc;padding:10px;background-color:#fafafa;height:200px;}
+.mt-config-file-path{overflow:auto;overflow-x:auto;overflow-y:hidden;height:2.75em;font-weight:bold;}
+ul#profile-data li{margin-left:0;padding-left:0;list-style:none;}
+#profile_userpic-field .field-content label{display:block;margin-top:5px;}
+.mt-profile-edit form{margin-bottom:.75em;}
+.custom-field-radio-list{margin-bottom:.25em;}
+.custom-field-radio-list li{list-style:none;margin-left:0;}
+.pkg:after{content:" ";display:block;visibility:hidden;clear:both;height:0.1px;font-size:0.1em;line-height:0;}
+.pkg{display:inline-block;}/*\*/* html .pkg{height:1%;}.pkg[class]{height:auto;}.pkg{display:block;}/**/.hidden{display:none !important;}.visible{display:block;}.invisible{display:block !important;visibility:hidden !important;position:absolute !important;left:0 !important;top:0 !important;width:0 !important;height:0 !important;font-size:0.1px !important;line-height:0 !important;}.overflow-auto{overflow:auto;}.overflow-hidden{overflow:hidden;}.right{float:right;}.left{float:left;display:inline;}.center{margin-left:auto;margin-right:auto;}.inline{display:inline;}.nowrap{white-space:nowrap;}
 /* End Simple CSS */
 
 .pkg { display: inline-block; }
@@ -898,8 +1178,18 @@ a:active{color:#a2ad00;}#container{margin:50px auto 0;text-align:left;width:360p
 /* */
     </style>
 </head>
-<body id="" class="chromeless dialog">
+<body class="chromeless dialog">
 <div id="container">
+<div id="drawer">
+  <div id="drawer-inner">
+    <a class="close" href="#">close</a>
+    <h3 id="drawer-title">Need some help?</h3>
+    <div id="drawer-content">
+    <p>It appears something went wrong.</p>
+    </div>
+  </div>
+</div>
+
 <div id="container-inner">
     <div id="ctl"></div>
     <div id="ctr"></div>
@@ -932,7 +1222,9 @@ sub print_footer {
         </div>
     </div>
 </div><!-- container-inner-->
-</div><!--container--></body>
+
+</div><!--container-->
+</body>
 </html>
     };
 }
@@ -1154,6 +1446,319 @@ sub fduration
 	$secs += $mins * 60;
 	return "$secs seconds";
     }
+}
+
+package JSON::Converter;
+use Carp;
+$JSON::Converter::VERSION = 0.995;
+sub new {
+    my $class = shift;
+    bless {indent => 2, pretty => 0, delimiter => 2, @_}, $class;
+}
+sub objToJson {
+	my $self = shift;
+	my $obj  = shift;
+	my $opt  = shift;
+
+	local(@{$self}{qw/autoconv execcoderef skipinvalid/});
+	local(@{$self}{qw/pretty indent delimiter/});
+
+	$self->_initConvert($opt);
+
+	return $self->toJson($obj);
+}
+sub toJson {
+	my ($self, $obj) = @_;
+
+	if(ref($obj) eq 'HASH'){
+		return $self->hashToJson($obj);
+	}
+	elsif(ref($obj) eq 'ARRAY'){
+		return $self->arrayToJson($obj);
+	}
+	else{
+		return;
+	}
+}
+sub hashToJson {
+	my $self = shift;
+	my $obj  = shift;
+	my ($k,$v);
+	my %res;
+
+	my ($pre,$post) = $self->_upIndent() if($self->{pretty});
+
+	if(grep { $_ == $obj } @{ $self->{_stack_myself} }){
+		die "circle ref!";
+	}
+
+	push @{ $self->{_stack_myself} },$obj;
+
+	for my $k (keys %$obj){
+		my $v = $obj->{$k};
+		if(ref($v) eq "HASH"){
+			$res{$k} = $self->hashToJson($v);
+		}
+		elsif(ref($v) eq "ARRAY"){
+			$res{$k} = $self->arrayToJson($v);
+		}
+		else{
+			$res{$k} = $self->valueToJson($v);
+		}
+	}
+
+	pop @{ $self->{_stack_myself} };
+
+	$self->_downIndent() if($self->{pretty});
+
+	if($self->{pretty}){
+		my $del = $self->{_delstr};
+		return "{$pre"
+		 . join(",$pre", map { _stringfy($_) . $del .$res{$_} } keys %res)
+		 . "$post}";
+	}
+	else{
+		return '{'. join(',',map { _stringfy($_) .':' .$res{$_} } keys %res) .'}';
+	}
+
+}
+
+
+sub arrayToJson {
+	my $self = shift;
+	my $obj  = shift;
+	my @res;
+
+	my ($pre,$post) = $self->_upIndent() if($self->{pretty});
+
+	if(grep { $_ == $obj } @{ $self->{_stack_myself} }){
+		die "circle ref!";
+	}
+
+	push @{ $self->{_stack_myself} },$obj;
+
+	for my $v (@$obj){
+		if(ref($v) eq "HASH"){
+			push @res,$self->hashToJson($v);
+		}
+		elsif(ref($v) eq "ARRAY"){
+			push @res,$self->arrayToJson($v);
+		}
+		else{
+			push @res,$self->valueToJson($v);
+		}
+	}
+
+	pop @{ $self->{_stack_myself} };
+
+	$self->_downIndent() if($self->{pretty});
+
+	if($self->{pretty}){
+		return "[$pre" . join(",$pre" ,@res) . "$post]";
+	}
+	else{
+		return '[' . join(',' ,@res) . ']';
+	}
+}
+
+
+sub valueToJson {
+	my $self  = shift;
+	my $value = shift;
+
+	return 'null' if(!defined $value);
+
+	if($self->{autoconv} and !ref($value)){
+		return $value  if($value =~ /^-?(?:0|[1-9][\d]*)(?:\.[\d]+)?$/);
+		return 'true'  if($value =~ /^true$/i);
+		return 'false' if($value =~ /^false$/i);
+	}
+
+	if(! ref($value) ){
+		return _stringfy($value)
+	}
+	elsif($self->{execcoderef} and ref($value) eq 'CODE'){
+		my $ret = $value->();
+		return 'null' if(!defined $ret);
+		return $self->toJson($ret) if(ref($ret));
+		return _stringfy($ret);
+	}
+	elsif( ! UNIVERSAL::isa($value, 'JSON::NotString') ){
+		die "Invalid value" unless($self->{skipinvalid});
+		return 'null';
+	}
+
+	return defined $value->{value} ? $value->{value} : 'null';
+}
+
+
+sub _stringfy {
+	my $arg = shift;
+	my $l   = length $arg;
+	my $s   = '"';
+	my $i = 0;
+
+	while($i < $l){
+		my $c = substr($arg,$i++,1);
+		if($c ge ' '){
+			$c =~ s{(["\\])}{\\$1};
+			$s .= $c;
+		}
+		elsif($c =~ tr/\n\r\t\f\b/nrtfb/){
+			$s .= '\\' . $c;
+		}
+		else{
+			$s .= '\\u00' . unpack('H2',$c);
+		}
+	}
+
+	return $s . '"';
+}
+sub _initConvert {
+	my $self = shift;
+	my %opt  = %{ $_[0] } if(@_ > 0 and ref($_[0]) eq 'HASH');
+
+	$self->{autoconv}    = $JSON::AUTOCONVERT if(!defined $self->{autoconv});
+	$self->{execcoderef} = $JSON::ExecCoderef if(!defined $self->{execcoderef});
+	$self->{skipinvalid} = $JSON::SkipInvalid if(!defined $self->{skipinvalid});
+
+	$self->{pretty}      =  $JSON::Pretty    if(!defined $self->{pretty});
+	$self->{indent}      =  $JSON::Indent    if(!defined $self->{indent});
+	$self->{delimiter}   =  $JSON::Delimiter if(!defined $self->{delimiter});
+
+	for my $name (qw/autoconv execcoderef skipinvalid pretty indent delimiter/){
+		$self->{$name} = $opt{$name} if(defined $opt{$name});
+	}
+
+	$self->{_stack_myself} = [];
+	$self->{indent_count}  = 0;
+
+	$self->{_delstr} = 
+		$self->{delimiter} ? ($self->{delimiter} == 1 ? ': ' : ' : ') : ':';
+
+	$self;
+}
+
+
+sub _upIndent {
+	my $self  = shift;
+	my $space = ' ' x $self->{indent};
+	my ($pre,$post) = ('','');
+
+	$post = "\n" . $space x $self->{indent_count};
+
+	$self->{indent_count}++;
+
+	$pre = "\n" . $space x $self->{indent_count};
+
+	return ($pre,$post);
+}
+
+
+sub _downIndent { $_[0]->{indent_count}--; }
+
+package JSON;
+
+use strict;
+use base qw(Exporter);
+
+@JSON::EXPORT = qw(objToJson);
+
+use vars qw($AUTOCONVERT $VERSION
+            $ExecCoderef $SkipInvalid $Pretty $Indent $Delimiter);
+
+$VERSION     = 0.99;
+
+$AUTOCONVERT = 1;
+$ExecCoderef = 0;
+$SkipInvalid = 0;
+$Indent      = 2; # (pretty-print)
+$Delimiter   = 2; # (pretty-print)  0 => ':', 1 => ': ', 2 => ' : '
+
+my $parser; # JSON => Perl
+my $conv;   # Perl => JSON
+
+sub new {
+	my $class = shift;
+	my %opt   = @_;
+	bless {
+		conv   => undef,  # JSON::Converter [perl => json]
+		parser => undef,  # JSON::Parser    [json => perl]
+		# below fields are for JSON::Converter
+		autoconv    => 1,
+		skipinvalid => 0,
+		execcoderef => 0,
+		pretty      => 0, # pretty-print mode switch
+		indent      => 2, # for pretty-print
+		delimiter   => 2, # for pretty-print
+		# overwrite
+		%opt,
+	}, $class;
+}
+
+sub objToJson {
+	my $self = shift || return;
+	my $obj  = shift;
+
+	if(ref($self) !~ /JSON/){ # class method
+		my $opt = __PACKAGE__->_getDefaultParms($obj);
+		$obj  = $self;
+		$conv ||= JSON::Converter->new();
+		$conv->objToJson($obj, $opt);
+	}
+	else{ # instance method
+		my $opt = $self->_getDefaultParms($_[0]);
+		$self->{conv}
+		 ||= JSON::Converter->new( %$opt );
+		$self->{conv}->objToJson($obj, $opt);
+	}
+}
+
+sub _getDefaultParms {
+	my $self = shift;
+	my $opt  = shift;
+	my $params;
+
+	if(ref($self)){ # instance
+		my @names = qw(pretty indent delimiter autoconv);
+		my ($pretty, $indent, $delimiter, $autoconv) = @{$self}{ @names };
+		$params = {
+			pretty => $pretty, indent => $indent,
+			delimiter => $delimiter, autoconv => $autoconv,
+		};
+	}
+	else{ # class
+		$params = {pretty => $Pretty, indent => $Indent, delimiter => $Delimiter};
+	}
+
+	if($opt and ref($opt) eq 'HASH'){ %$params = ( %$opt ); }
+
+	return $params;
+}
+
+sub autoconv { $_[0]->{autoconv} = $_[1] if(defined $_[1]); $_[0]->{autoconv} }
+sub pretty { $_[0]->{pretty} = $_[1] if(defined $_[1]); $_[0]->{pretty} }
+sub indent { $_[0]->{indent} = $_[1] if(defined $_[1]); $_[0]->{indent} }
+sub delimiter { $_[0]->{delimiter} = $_[1] if(defined $_[1]); $_[0]->{delimiter} }
+
+sub Number {
+	my $num = shift;
+	if(!defined $num or $num !~ /^-?(0|[1-9][\d]*)(\.[\d]+)?$/){
+		return undef;
+	}
+	bless {value => $num}, 'JSON::NotString';
+}
+
+sub True {
+	bless {value => 'true'}, 'JSON::NotString';
+}
+
+sub False {
+	bless {value => 'false'}, 'JSON::NotString';
+}
+
+sub Null {
+	bless {value => undef}, 'JSON::NotString';
 }
 
 }
