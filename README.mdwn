@@ -1,0 +1,20 @@
+# About the Melody Installer
+
+The Melody installer is a super-simple, fool proof installer for
+the Melody platform. It reduces installation to the following steps:
+
+1. Download `melody-install.cgi`.
+2. FTP `melody-install.cgi` to your web server's `cgi-bin` directory.
+3. Access `melody-install.cgi` via your web browser.
+4. Follow the on-screen instructions.
+
+The on-screen instructions will:
+
+* help you to identify any steps you need to take to configure your 
+  server properly.
+* choose which install option is best for you.
+* create and setup your database.
+* download and install the Melody software and its prerequisites 
+  for you.
+* setup your first user and get you off to the races.
+
