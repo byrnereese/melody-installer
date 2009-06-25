@@ -102,9 +102,10 @@ Byrne Reese <byrne@majordojo.com>
 
 use strict;
 use Cwd;
-use CGI qw/:standard/;
+use CGI;
 use LWP::UserAgent;
 use File::Spec;
+use File::Find;
 use File::Path;
 use File::Copy qw/ copy /;
 use File::Temp qw/ tempfile tempdir /;
@@ -125,92 +126,135 @@ use constant MODULE_LOAD_COND_URL
 use constant MODULE_LOAD_URL
     => 'http://cpansearch.perl.org/src/KANE/Module-Load-0.16/lib/Module/Load.pm';
 
-my $JSON      = param('json');
-my $TYPE      = param('type');
-my $FOLDER    = param('folder');
-my $UPGRADE   = param('upgrade');
-my $OK        = param('proceed');
+my $cgi;
+BEGIN { $cgi = new CGI; }
+my $JSON      = $cgi->param('json');
+my $TYPE      = $cgi->param('type');
+my $FOLDER    = $cgi->param('folder');
+my $UPGRADE   = $cgi->param('upgrade');
+my $OK        = $cgi->param('proceed');
 
-my $DOCROOT   = param('docroot');
-my $BASEURL   = param('baseurl');
-my $CGIBIN    = param('cgibin');
-my $CGIBINURL = param('cgibinurl');
+my $DOCROOT   = $cgi->param('docroot');
+my $BASEURL   = $cgi->param('baseurl');
+my $CGIBIN    = $cgi->param('cgibin');
+my $CGIBINURL = $cgi->param('cgibinurl');
 
-my $DBNAME    = param('dbname');
-my $DBUSER    = param('dbuser');
-my $DBPASS    = param('dbpass');
-my $DBHOST    = param('dbhost');
+my $DBNAME    = $cgi->param('dbname');
+my $DBUSER    = $cgi->param('dbuser');
+my $DBPASS    = $cgi->param('dbpass');
+my $DBHOST    = $cgi->param('dbhost');
 
-my @CORE_REQ = (
-    [ 'CGI', 0, 1, 'CGI is required for all Movable Type application functionality.' ],
-    [ 'Image::Size', 0, 1, 'Image::Size is required for file uploads (to determine the size of uploaded images in many different formats).' ],
-    [ 'File::Spec', 0.8, 1, 'File::Spec is required for path manipulation across operating systems.' ],
-    [ 'CGI::Cookie', 0, 1, 'CGI::Cookie is required for cookie authentication.' ],
-);
-
-my @CORE_DATA = (
-    [ 'DBI', 1.21, 0, 'DBI is required to store data in database.' ],
-    [ 'DBD::mysql', 0, 0, 'DBI and DBD::mysql are required if you want to use the MySQL database backend.' ],
-);
-
-my @CORE_OPT = (
-    # Feature: HTML encoding
-    [ 'HTML::Entities', 0, 0, 'HTML::Entities is needed to encode some characters, but this feature can be turned off using the NoHTMLEntities option in the configuration file.' ],
-    # Feature: TrackBack
-    [ 'LWP::UserAgent', 0, 0, 'LWP::UserAgent is optional; It is needed if you wish to use the TrackBack system, the weblogs.com ping, or the MT Recently Updated ping.' ],
-    # Feature: TrackBack
-    [ 'HTML::Parser', 0, 0, 'HTML::Parser is optional; It is needed if you wish to use the TrackBack system, the weblogs.com ping, or the MT Recently Updated ping.' ],
-    # Feature: XML-RPC
-    [ 'SOAP::Lite', 0.50, 0, 'SOAP::Lite is optional; It is needed if you wish to use the MT XML-RPC server implementation.' ],
-    # Feature: Upload file overwrite
-    [ 'File::Temp', 0, 0, 'File::Temp is optional; It is needed if you would like to be able to overwrite existing files when you upload.' ],
-    # Feature: Publish Queue
-    [ 'Scalar::Util', 0, 1, 'Scalar::Util is optional; It is needed if you want to use the Publish Queue feature.'],
-    [ 'List::Util', 0, 1, 'List::Util is optional; It is needed if you want to use the Publish Queue feature.'],
-
-    # Feature: Thumbnails
-    [ 'Image::Magick', 0, 0, 'Image::Magick is optional; It is needed if you would like to be able to create thumbnails of uploaded images.' ],
-
-    # Feature: Some MT Plugins
-    [ 'Storable', 0, 0, 'Storable is optional; it is required by certain MT plugins available from third parties.'],
-
-    # Feature: High performant comment authentication
-    [ 'Crypt::DSA', 0, 0, 'Crypt::DSA is optional; if it is installed, comment registration sign-ins will be accelerated.'],
-
-    # Feature: Comment Registration
-    [ 'MIME::Base64', 0, 0, 'MIME::Base64 is required in order to enable comment registration.'],
-
-    # Feature: AtomPub
-    [ 'XML::Atom', 0, 0, 'XML::Atom is required in order to use the Atom API.'],
-
-    # Feature: Memcache
-    [ 'Cache::Memcached', 0, 0, 'Cache::Memcached and memcached server/daemon is required in order to use memcached as caching mechanism used by Movable Type.'],
-
-    # Feature: Backup/Restore
-    [ 'Archive::Tar', 0, 0, 'Archive::Tar is required in order to archive files in backup/restore operation.'],
-    [ 'IO::Compress::Gzip', 0, 0, 'IO::Compress::Gzip is required in order to compress files in backup/restore operation.'],
-    [ 'IO::Uncompress::Gunzip', 0, 0, 'IO::Uncompress::Gunzip is required in order to decompress files in backup/restore operation.'],
-    [ 'Archive::Zip', 0, 0, 'Archive::Zip is required in order to archive files in backup/restore operation.'],
-    [ 'XML::SAX', 0, 0, 'XML::SAX and/or its dependencies is required in order to restore.'],
-
-    # OpenID
-    [ 'Digest::SHA1', 0, 0, 'Digest::SHA1 and its dependencies are required in order to allow commenters to be authenticated by OpenID providers including Vox and LiveJournal.'],
-
-    # SMTP
-    [ 'Mail::Sendmail', 0, 0, 'Mail::Sendmail is required for sending mail via SMTP Server.'],
-
-    # mt:if
-    [ 'Safe', 0, 0, 'This module is used in test attribute of MTIf conditional tag.'],
-
-    # Markdown
-    [ 'Digest::MD5', 0, 0, 'This module is used by the Markdown text filter.'],
-
-    # Search
-    [ 'Text::Balanced', 0, 0, 'This module is required in mt-search.cgi if you are running Movable Type on Perl older than Perl 5.8.' ],
-
-    # FastCGI
-    [ 'FCGI', 0, 0, '' ],
-);
+my $PREREQS = {
+    'CGI' => {
+	version => 0,
+	required => 1,
+	description => 'CGI is required for all Movable Type application functionality.',
+    },
+    'Image::Size' => {
+	version => 0,
+	required => 1,
+	description => 'Image::Size is required for file uploads (to determine the size of uploaded images in many different formats).',
+    },
+    'File::Spec' => {
+	version => 0.8,
+	required => 1,
+	description => 'File::Spec is required for path manipulation across operating systems.',
+    },
+    'CGI::Cookie' => {
+	version => 0,
+	required => 1,
+	description => 'CGI::Cookie is required for cookie authentication.',
+    },
+    'DBI' => {
+	version => 1.21, 
+	required => 1,
+	description => 'DBI is required to store data in database.',
+    },
+    'DBD::mysql' => {
+	version => 0,
+	required => 1,
+	description => 'DBI and DBD::mysql are required if you want to use the MySQL database backend.',
+    },
+    'HTML::Entities' => {
+	version => 0,
+	required => 0,
+	description => 'HTML::Entities is needed to encode some characters, but this feature can be turned off using the NoHTMLEntities option in the configuration file.',
+	short => 'HTML Encoding',
+    },
+    'LWP::UserAgent' => {
+	version => 0,
+	required => 0,
+	description => 'LWP::UserAgent is optional; It is needed if you wish to use the TrackBack system, the weblogs.com ping, or the MT Recently Updated ping.',
+	short => 'TrackBack',
+    },
+    'HTML::Parser' => {
+	version => 0, 
+	required => 0,
+	description => 'HTML::Parser is optional; It is needed if you wish to use the TrackBack system, the weblogs.com ping, or the MT Recently Updated ping.',
+	short => 'TrackBack',
+    },
+    'SOAP::Lite' => {
+	version => 0.50,
+	required => 0,
+	description => 'SOAP::Lite is optional; It is needed if you wish to use the MT XML-RPC server implementation.',
+	short => 'XML-RPC',
+    },
+    'File::Temp' => {
+	version => 0,
+	required => 0,
+	description => 'File::Temp is optional; It is needed if you would like to be able to overwrite existing files when you upload.',
+	short => "Upload file overwrite",
+    },
+    'Scalar::Util' => {
+	version => 0,
+	required => 1, 
+	description => 'Scalar::Util is optional; It is needed if you want to use the Publish Queue feature.',
+	short => 'Publish Queue',
+    },
+    'List::Util' => {
+	version => 0,
+	required => 1,
+	description => 'List::Util is optional; It is needed if you want to use the Publish Queue feature.',
+	short => 'Publish Queue',
+    },
+    'Image::Magick' => {
+	version => 0,
+	required => 0,
+	description => 'Image::Magick is optional; It is needed if you would like to be able to create thumbnails of uploaded images.',
+	short => 'Image manipulation, userpics and thumbnails',
+    },
+    'Storable' => {
+	version => 0,
+	required => 0,
+	description => 'Storable is optional; it is required by certain MT plugins available from third parties.',
+	short => "Some plugins",
+    },
+    'Crypt::DSA' => {
+	version => 0, 
+	required => 0,
+	description => 'Crypt::DSA is optional; if it is installed, comment registration sign-ins will be accelerated.',
+	short => 'Feature: High performant comment authentication',
+    },
+#    'MIME::Base64', 0, 0, 'MIME::Base64 is required in order to enable comment registration.','Comment Registration',
+#    'XML::Atom', 0, 0, 'XML::Atom is required in order to use the Atom API.','Atom Publishing Protocol',
+#    'Cache::Memcached', 0, 0, 'Cache::Memcached and memcached server/daemon is required in order to use memcached as caching mechanism used by Movable Type.','Memcache',
+#    'Archive::Tar', 0, 0, 'Archive::Tar is required in order to archive files in backup/restore operation.','Backup/Restore',
+#    'IO::Compress::Gzip', 0, 0, 'IO::Compress::Gzip is required in order to compress files in backup/restore operation.','Backup/Restore',
+#    'IO::Uncompress::Gunzip', 0, 0, 'IO::Uncompress::Gunzip is required in order to decompress files in backup/restore operation.','Backup/Restore',
+#    'Archive::Zip', 0, 0, 'Archive::Zip is required in order to archive files in backup/restore operation.','Backup/Restore',
+#    'XML::SAX', 0, 0, 'XML::SAX and/or its dependencies is required in order to restore.','Backup/Restore',
+#    'Digest::SHA1', 0, 0, 'Digest::SHA1 and its dependencies are required in order to allow commenters to be authenticated by OpenID providers including Vox and LiveJournal.','OpenID',
+#    'Mail::Sendmail', 0, 0, 'Mail::Sendmail is required for sending mail via SMTP Server.','SMTP',
+#    'Safe', 0, 0, 'This module is used in test attribute of MTIf conditional tag.','mt:if',
+#    'Digest::MD5', 0, 0, 'This module is used by the Markdown text filter.','Markdown',
+#    'Text::Balanced', 0, 0, 'This module is required in mt-search.cgi if you are running Movable Type on Perl older than Perl 5.8.','Search',
+    'FCGI' => {
+	version => 0, 
+	required => 0,
+	description => 'FCGI is needed in order to run under FastCGI.',
+	short => 'FastCGI',
+    },
+};
 
 
 sub is_cgibin_writable {
@@ -252,23 +296,22 @@ sub permissions_check {
     return 1;
 }
 
-sub prompt_for_prereqs {
-    for my $list (\@CORE_REQ, \@CORE_DATA, \@CORE_OPT) {
-	my $data = ($list == \@CORE_DATA);
-	my $req = ($list == \@CORE_REQ);
-	for my $ref (@$list) {
-	    my($mod, $ver, $required, $desc) = @$ref;
-	    if ('CODE' eq ref($desc)) {
-		$desc = $desc->();
-	    }
-	    eval("use $mod" . ($ver ? " $ver;" : ";"));
-	    if ($@) {
-		debug("$mod is NOT installed.");
-	    } else {
-#		debug("$mod is installed.");
-	    }
+sub check_for_prereqs {
+    my $results;
+    for my $mod (keys %$PREREQS) {
+	if ('CODE' eq ref($PREREQS->{$mod}->{description})) {
+#	    $desc = $PREREQS->{$mod}->{description}->();
 	}
+	my $ver = $PREREQS->{$mod}->{version};
+	eval("use $mod" . ($ver ? " $ver;" : ";"));
+	if ($@) {
+	    $results->{$mod}->{ok} = 0;
+	} else {
+	    $results->{$mod}->{ok} = 1;
+	}
+	$results->{$mod}->{required} = $PREREQS->{$mod}->{required};
     }
+    return $results;
 }
 
 sub download_dep {
@@ -454,8 +497,6 @@ sub docroot_can_serve_cgi {
 }
 
 sub prompt_for_mthome {
-    my $Q = new CGI;
-    # TODO - this will be an AJAX call
     return check_install_options();
 }
 
@@ -466,30 +507,31 @@ sub prompt_for_mthome_html {
     my $can_three   = $options->{types}->{3}->{ok};
     my $can_install = $can_one || $can_two || $can_three;
     my $html;
-    $html .= qq{
+    $html .= q{
 <script type="text/javascript">
-var cgibin  = "$CGIBINURL";
-var docroot = "$BASEURL";
-var baseurl;
-}.q{
 function change_urls(e) {
+  var baseurl;
   if ( $(e).val() == 1 ) {
      $('#folder-static').fadeOut('fast');
      $('#url-static').fadeOut('fast');
-     baseurl = cgibin;
+     baseurl = cgibin_url;
   } else if ( $(e).val() == 2 ) {
      $('#folder-static').fadeOut('fast');
      $('#url-static').fadeOut('fast');
-     baseurl = docroot;
+     baseurl = docroot_url;
   } else if ( $(e).val() == 3 ) {
      $('#folder-static').fadeIn('fast');
      $('#url-static').fadeIn('fast');
-     baseurl = cgibin;
+     baseurl = cgibin_url;
   }
   var url = baseurl + $('#folder-mthome input').val() + '/mt.cgi';
   $('#mthome').val( url );
 }
 $(document).ready(function(){
+  $('#tryagain').click(function(){
+    if (open_drawer_is != 0) { close_drawer(); }
+    begin();
+  });
   $('.folder').bind('change keyup', function() {
     var app = $('#folder-mthome input').val();
     var static = $('#folder-static input').val();
@@ -509,16 +551,9 @@ $(document).ready(function(){
   });
 });
 </script>
-<form action="mt-install.cgi">
+  <h2>Choose an install option</h2>
+  <ul class="install_opt">
 };
-    $html .= qq{  <input type="hidden" name="upgrade" value="$UPGRADE" />};
-    $html .= qq{  <input type="hidden" name="docroot" value="$DOCROOT" />};
-    $html .= qq{  <input type="hidden" name="baseurl" value="$BASEURL" />};
-    $html .= qq{  <input type="hidden" name="cgibin" value="$CGIBIN" />};
-    $html .= qq{  <input type="hidden" name="cgibinurl" value="$CGIBINURL" />};
-
-    $html .= q{  <h2>Choose an install option</h2>};
-    $html .= q{  <ul class="install_opt">};
     $html .= q{    <li id="type1" class="install-type pkg }.($can_one ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="1" onclick="change_urls(this);" /> Install all of Open Melody in cgi-bin</label> }.(!$can_one ? '<a href="#" id="fixme-1" class="fixme install-1">Fix me</a>' : '').q{</li>};
     $html .= q{    <li id="type2" class="install-type pkg }.($can_two ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="2" onclick="change_urls(this);" /> Install all of Open Melody in document root</label> }.(!$can_two ? '<a href="#" id="fixme-2" class="fixme install-2">Fix me</a>' : '').q{</li>};
     $html .= q{    <li id="type3" class="install-type pkg }.($can_three ? 'possible' : 'impossible').q{"><label><input type="radio" name="type" value="3" onclick="change_urls(this);" /> Install app files in cgi-bin, and static files in document root</label> }.(!$can_three ? '<a href="#" id="fixme-3" class="fixme install-3">Fix me</a>' : '').q{</li>};
@@ -537,8 +572,7 @@ $(document).ready(function(){
 	$html .= qq{    <li id="url-static" class="pkg wrap url" style="display: none"><label for="mtstatic">URL to Static Content:</label><input type="text" id="mtstatic" name="mtstatic" size="40" value="" /></li>};
 	$html .= q{  </ul>};
 	
-	$html .= q{  <p><input type="submit" name="submit" value="Next" /></p>};
-	$html .= q{</form>};
+	$html .= q{  <p><button id="next-checkprereq">Next</button></p>};
     } else {
 	$html .= q{<p>It looks like your system is not ready yet. To install Open Melody try to fix one of the options above. Click "Fix me" for help.</p>};
 	$html .= q{<button id="tryagain">Try Again</button>};
@@ -546,26 +580,17 @@ $(document).ready(function(){
     return $html;
 }
 
-sub prompt_for_db_info {
-    my $Q = new CGI;
-    print q{<form action="mt-install.cgi">};
-    print q{  <h2>Database time</h2>};
-
-    print qq{  <input type="hidden" name="type" value="$TYPE" />};
-    print qq{  <input type="hidden" name="folder" value="$FOLDER" />};
-    print qq{  <input type="hidden" name="docroot" value="$DOCROOT" />};
-    print qq{  <input type="hidden" name="baseurl" value="$BASEURL" />};
-    print qq{  <input type="hidden" name="cgibin" value="$CGIBIN" />};
-    print qq{  <input type="hidden" name="cgibinurl" value="$CGIBINURL" />};
-
-    print q{  <ul class="db-info">};
-    print q{    <li class="pkg"><label>Database Host: <input type="text" id="dbhost" name="dbhost" value="localhost" size="40" /></label></li>};
-    print q{    <li class="pkg"><label>Database User: <input type="text" id="dbuser" name="dbuser" value="" size="40" /></label></li>};
-    print q{    <li class="pkg"><label>Database Password: <input type="password" id="dbpass" name="dbpass" value="" size="40" /></label></li>};
-    print q{    <li class="pkg"><label>Database Name: <input type="text" id="dbname" name="dbname" value="movabletype" size="40" /></label></li>};
-    print q{  </ul>};
-    print q{  <p><input type="submit" name="submit" value="Next" /></p>};
-    print q{</form>};
+sub prompt_for_db_info_html {
+    my $html = '';
+    $html .= q{  <h2>Database time</h2>};
+    $html .= q{  <ul class="db-info">};
+    $html .= q{    <li class="pkg"><label>Database Host: <input type="text" id="dbhost" name="dbhost" value="localhost" size="40" /></label></li>};
+    $html .= q{    <li class="pkg"><label>Database User: <input type="text" id="dbuser" name="dbuser" value="" size="40" /></label></li>};
+    $html .= q{    <li class="pkg"><label>Database Password: <input type="password" id="dbpass" name="dbpass" value="" size="40" /></label></li>};
+    $html .= q{    <li class="pkg"><label>Database Name: <input type="text" id="dbname" name="dbname" value="movabletype" size="40" /></label></li>};
+    $html .= q{  </ul>};
+    $html .= q{  <p><input type="submit" name="submit" value="Next" /></p>};
+    return $html;
 }
 
 sub _cgi_server_path {
@@ -587,7 +612,6 @@ sub _static_file_path {
 }
 
 sub find_installs {
-    use File::Find;
     my $installs;
     find(sub {
 	if ($File::Find::name =~ /mt-config.cgi$/) {
@@ -626,26 +650,36 @@ sub prompt_for_upgrade_html {
     my ($installs) = @_;
     my @dirs = sort keys %$installs;
     my $html;
-    $html .= q{<form action="mt-install.cgi">};
+    $html .= q{
+<script type="text/javascript">
+$(document).ready(function(){
+  static_path = '';
+  $('#begin').click(function(){
+    alert( "static: " + static_path );
+    var result = $("input[name='upgrade']:checked").val();
+    if (result == "no") {
+      dest_app = 'foobar!';
+    } else {
+      dest_app = result;
+    }
+    begin();    
+  });
+});
+</script>
+    };
     $html .= q{  <h2>What do you want to do?</h2>};
-#    $html .= qq{  <input type="hidden" id="docroot" name="docroot" value="$DOCROOT" />};
-#    $html .= qq{  <input type="hidden" name="baseurl" value="$BASEURL" />};
-#    $html .= qq{  <input type="hidden" id="cgibin" name="cgibin" value="$CGIBIN" />};
-#    $html .= qq{  <input type="hidden" name="cgibinurl" value="$CGIBINURL" />};
-#    $html .= qq{  <input type="hidden" id="static" name="static" value="" />};
     $html .= q{  <p>I have found a copy of Open Melody already installed on your system. Do you want to upgrade an existing install, or install a brand new copy?</p>};
     $html .= q{  <ul class="upgrade_opt">};
-    $html .= q{    <li class="pkg"><label><input type="radio" name="upgrade" value="no" checked /> Install a new instance of Open Melody</label></li>};
+    $html .= q{    <li class="pkg"><label><input type="radio" name="upgrade" value="no" onclick="static_path='';" checked /> Install a new instance of Open Melody</label></li>};
     foreach my $dir (@dirs) {
-	$html .= qq{    <li class="pkg }.($installs->{$dir}->{ok} ? "possible" : "impossible").qq{"><label><input type="radio" name="upgrade" value="$dir" onclick="\$('cgibin').val('$installs->{$dir}->{app}'); \$('static').val('$installs->{$dir}->{static}');" /> $dir</label>};
+	$html .= qq{    <li class="pkg }.($installs->{$dir}->{ok} ? "possible" : "impossible").qq{"><label><input type="radio" name="upgrade" value="$dir" onclick="cgibin_path='$installs->{$dir}->{app}'; static_path='$installs->{$dir}->{static}';" /> $dir</label>};
 	if (!$installs->{$dir}->{ok}) {
 	    $html .= qq{ <a href="#" class="fixme upgrade-opt" title="$dir">Fix me</a>};
 	}
 	$html .= qq{</li>};
     }
     $html .= q{  </ul>};
-    $html .= q{  <p><input type="submit" name="submit" value="Next" /></p>};
-    $html .= q{</form>};
+    $html .= q{  <p><button id="begin">Next</button></p>};
     return $html;
 }
 
@@ -654,77 +688,16 @@ sub prompt_for_upgrade {
 <script type="text/javascript">
 var cgibin = "$CGIBIN";
 var docroot = "$DOCROOT";
-}.q{$(document).ready(function(){
-  $('#upgrade').html('<img src="http://localhost/~breese/mt/mt-static/images/indicator.gif" />');
-  $.post('mt-install.cgi', 
-         { 
-           'json'    : 'find_installs',
-           'cgibin'  : cgibin,
-           'docroot' : docroot 
-         },
-         function(data){
-           $('#upgrade').html('');
-           $('#upgrade').html(data.html);
-           $('li.impossible input').attr('disabled',true);
-           $('.fixme').click(function(){ 
-             var html = '';
-             if ($(this).hasClass('install-1')) {
-               html = "<p>We encountered the following problems when trying to install Open Melody into your <code>cgi-bin</code> directory:</p><ul>";
-               var resolve = "";
-               if (!data.options.types[1].directory) {
-                 html += "<li>The path you specified for your cgi-bin is not a directory.</li>";
-                 resolve += "<li>Connect to your web server and create the directory:<br><code>" + data.options.cgibin + "</code></li>";
-               } else {
-                 if (!data.options.types[1].writable) {
-                   html += "<li>The cgi-bin directory you identified is not writable.</li>";
-                 }              
-                 if (!data.options.types[1].exists) {
-                   html += "<li>The path you specified does not exist. (TODO - fix me)</li>";
-                 }              
-               }
-               if (!data.options.types[1].static_ok) {
-                 html += "<li>The cgi-bin directory you identified is unable to serve static files like javascript, css or HTML.</li>";
-               }              
-               html += "</ul><h4>How to resolve the problem</h4><ul>";
-               html += resolve;
-               html += "</ul>";
-             } else if ($(this).hasClass('install-2')) {
-               html = "<p>We encountered the following problems when trying to install Open Melody into your document root:</p><ul>";
-               var resolve = "";
-               if (!data.options.types[2].directory) {
-                 html += "<li>The path you specified for your document root is not a directory.</li>";
-                 resolve += "<li>Connect to your web server and create the directory:<br><code>" + data.options.docroot + "</code></li>";
-               } else {
-                 if (!data.options.types[2].writable) {
-                   html += "<li>The directory you identified is not writable.</li>";
-                 }              
-                 if (!data.options.types[2].exists) {
-                   html += "<li>The path you specified does not exist. (TODO - fix me)</li>";
-                 }              
-               }
-               if (!data.options.types[2].htaccess_ok) {
-                 html += "<li>The document root you specified is not capable of serving CGI applications.</li>";
-               }              
-               html += "</ul><h4>How to resolve the problem</h4><ul>";
-               html += resolve;
-               html += "</ul>";
-             } else if ($(this).hasClass('install-3')) {
-               html = '';
-             }
-             toggle_drawer($(this).attr('id'),html); 
-           });
-         },
-         "json"
-  );
+}.q{
+$(document).ready(function(){
+  begin();
 });
 </script>
     };
-    print q{<div id="upgrade"></div>};
 }
 
 sub write_config {
     my ($dest,$cgi,$static) = @_;
-    my $Q = new CGI;
     open CONFIG,">$dest";
     print CONFIG <<EOC;
 # Open Melody configuration file
@@ -745,37 +718,43 @@ EOC
 }
 
 sub prompt_for_file_paths {
-    my $Q = new CGI;
-    print qq{
+    print q{
 <script type="text/javascript">
-var cgibin = "$CGIBIN";
-var baseurl = "$BASEURL";
-}.q{
 $(document).ready(function(){
-  $('#baseurl').bind("keypress change",function() {
+  $('#baseurl').bind("keyup change",function() {
     var base = $('#baseurl').val();
-    $('#cgibinurl').val( base + "cgi-bin/"); 
+    var lastchar = base.substr(base.length-1,1);
+    $('#cgibinurl').val( base + (lastchar == '/' ? '' : "/") + "cgi-bin/"); 
   });
-  $('#docroot').bind("keypress change",function() {
+  $('#docroot').bind("keyup change",function() {
     var base = $('#docroot').val();
-    $('#cgibin').val( base + "cgi-bin/"); 
+    var lastchar = base.substr(base.length-1,1);
+    $('#cgibin').val( base + (lastchar == '/' ? '' : "/") + "cgi-bin/"); 
+  });
+  $('#begin').click(function(){
+    /* Initialize all of the paths */
+    docroot_path = $('#docroot').val();
+    docroot_url  = $('#baseurl').val();
+    cgibin_path  = $('#cgibin').val();
+    cgibin_url   = $('#cgibinurl').val();
+    begin();    
   });
 });
 </script>
     };
-    print q{<form action="mt-install.cgi">};
+#    print q{<form action="mt-install.cgi">};
     print q{  <h2>Does this look right to you?</h2>};
     print q{  <ul class="paths">};
 
-    print q{    <li class="pkg"><label>Homepage URL: <input type="text" id="baseurl" name="baseurl" value="}."http" . ($Q->https() ? 's' : '') . "://" .$Q->server_name().q{" size="40" /></label></li>};
+    print q{    <li class="pkg"><label>Homepage URL: <input type="text" id="baseurl" name="baseurl" value="}."http" . ($cgi->https() ? 's' : '') . "://" .$cgi->server_name().q{" size="40" /></label></li>};
     print q{    <li class="pkg"><label>Path to Document Root: <input type="text" id="docroot" name="docroot" value="}.$ENV{DOCUMENT_ROOT}.q{" size="40" /></label></li>};
 
-    print q{    <li class="pkg"><label>URL to cgi-bin: <input type="text" id="cgibinurl" name="cgibinurl" value="http}.($Q->https() ? 's' : '') . "://" .$Q->server_name().q{/cgi-bin/" size="40" /></label></li>};
+    print q{    <li class="pkg"><label>URL to cgi-bin: <input type="text" id="cgibinurl" name="cgibinurl" value="http}.($cgi->https() ? 's' : '') . "://" .$cgi->server_name().q{/cgi-bin/" size="40" /></label></li>};
     print q{    <li class="pkg"><label>Path to cgi-bin: <input type="text" id="cgibin" name="cgibin" value="}.getcwd.q{" size="40" /></label></li>};
 
     print q{  </ul>};
-    print q{  <p><input type="submit" name="submit" value="Begin" /></p>};
-    print q{</form>};
+    print q{  <p><button id="begin">Begin</button></p>};
+#    print q{</form>};
 }
 
 sub check_install_options {
@@ -839,8 +818,8 @@ sub write_test_file {
 }
 
 sub get_current_url {
-    my $Q = new CGI;
-    my $url = "http" . ($Q->https() ? 's' : '') . "://" . $Q->server_name() . $Q->script_name();
+    my $url = "http" . ($cgi->https() ? 's' : '') . "://" .
+	$cgi->server_name() . $cgi->script_name();
 #    debug("Current URL is: $url");
     return $url;
 }
@@ -874,8 +853,25 @@ sub cgibin_can_serve_static_files {
     return 1;
 }
 
+sub prereq_html {
+    my ($results) = @_;
+    my $html = '';
+    $html = "";
+    $html .= "<ul>";
+    my $can_continue = 1;
+    foreach my $mod (sort keys %$results) {
+	if (!$results->{$mod}->{ok}) {
+	    $html .= qq{<li><code>$mod</code> is not installed, disabling the following feature: } . $PREREQS->{$mod}->{short} . qq{ <a href="#" class="fixme" title="$mod">Fix me</a></li>};
+	    if ($results->{$mod}->{required} == 1) { $can_continue = 0; }
+        }
+    }
+    $html .= q{</ul>};
+    $html .= q{<button id="tryagain-prereq">Refresh</button>};
+    $html .= q{<button id="next-dbinfo"}.($can_continue ? '' : ' disabled="true"').q{>Continue</button>};
+}
+
 if ($JSON) {
-    print header("application/json");
+    print $cgi->header("application/json");
     if ($JSON eq 'find_installs') {
 	my $installs = find_installs();
 	my @dirs = sort keys %$installs;
@@ -894,12 +890,26 @@ if ($JSON) {
 		    'html' => prompt_for_upgrade_html($installs),
 		});
 	}
-    } elsif ($JSON eq 'check_install') {
-	my $options = check_install_options();
-	my $html = prompt_for_mthome_html($options);
+    } elsif ($JSON eq 'check_prereqs') {
+	my $results = check_for_prereqs();
+	my @mods = keys %$results;
+	if ($#mods > -1) {
+	    print JSON::objToJson({
+		'results' => $results,
+		'html' => prereq_html($results),
+            });
+	} else {
+	    # TODO - prompt for database information
+	}
+    } elsif ($JSON eq 'db_info') {
 	print JSON::objToJson({
-	    'options' => $options,
-	    'html' => $html,
+	    'html' => prompt_for_db_info_html(),
+	});
+    } elsif ($JSON eq 'do_install') {
+	my $files = install();
+	print JSON::objToJson({
+	    'files' => $files,
+	    'html' => install_html($files),
 	});
     }
 } else {
@@ -921,14 +931,14 @@ sub main {
 	}
 	prompt_for_prereqs();
     } elsif (!$DBNAME && $UPGRADE eq "no") {
-	prompt_for_db_info();
+	print prompt_for_db_info_html();
     } else {
 	install();
     }
 }
 
 sub print_header {
-    print header;
+    print $cgi->header;
     my $html = <<EOH;
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
     "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -944,8 +954,17 @@ sub print_header {
 EOH
     $html .= q{
     <script type="text/javascript">
+/* Globals */
+var docroot_path;
+var docroot_url;
+var cgibin_path;
+var cgibin_url;
+var static_path;
+var static_url;
+var install_type;
 var open_drawer_is = 0;
 var is_animating = 0;
+var pages = new Array();
 function toggle_drawer(opener,new_html) {
   if (open_drawer_is == 0) { 
     $('#drawer-content').html(new_html);
@@ -982,7 +1001,124 @@ function close_drawer() {
 $(document).ready(function(){
     $('.close').click(function(){ close_drawer(); });
     $('#drawer').show();
+    if (pages.length == 0) {
+      $('#back').attr('disabled',true);
+    }
+    $('#back').click(function(){
+      var html = pages.shift();
+      $('#upgrade').html( html );
+    });
 });
+function init_cpan_help(link,module) {
+    var html = "<p>To enable this feature you will need to install the following Perl module. If you can, logon to your web server and run the following commands as root:</p><code><pre>";
+    html += "cpan " + module + "\n";
+    html += "</pre></code>";
+    return html;
+}
+function init_setup_help(link,options) {
+    var html = '';
+    if (link.hasClass('install-1')) {
+       html = "<p>We encountered the following problems when trying to install Open Melody into your <code>cgi-bin</code> directory:</p><ul>";
+       var resolve = "";
+       if (!options.types[1].exists) {
+           html += "<li>The path you specified does not exist. (TODO - fix me)</li>";
+           resolve += "<li>Connect to your web server and create the directory:<br><code>" + cgibin_path + "</code></li>";
+       } else {
+           if (!options.types[1].writable) {
+               html += "<li>The cgi-bin directory you identified is not writable.</li>";
+               resolve += '<li>Connect to your web server and change the permissions on the following directory <a href="#">learn how</a>:<br><code>' + cgibin_path + "</code></li>";
+           }              
+           if (!options.types[1].directory) {
+               html += "<li>The path you specified for your cgi-bin is not a directory.</li>";
+           }              
+       }
+       if (!options.types[1].static_ok) {
+           html += "<li>The cgi-bin directory you identified is unable to serve static files like javascript, css or HTML.</li>";
+       }              
+       html += "</ul><h4>How to resolve the problem</h4><ul>";
+       html += resolve;
+       html += "</ul>";
+    } else if (link.hasClass('install-2')) {
+       html = "<p>We encountered the following problems when trying to install Open Melody into your document root:</p><ul>";
+       var resolve = "";
+       if (!options.types[2].directory) {
+           html += "<li>The path you specified for your document root is not a directory.</li>";
+           resolve += "<li>Connect to your web server and create the directory:<br><code>" + data.options.docroot + "</code></li>";
+       } else {
+           if (!options.types[2].writable) {
+               html += "<li>The directory you identified is not writable.</li>";
+           }              
+           if (!options.types[2].exists) {
+               html += "<li>The path you specified does not exist. (TODO - fix me)</li>";
+           }              
+       }
+       if (!options.types[2].htaccess_ok) {
+           html += "<li>The document root you specified is not capable of serving CGI applications.</li>";
+           resolve += "<li>You will need to modify your web server's configuration by adding the following:<br><code><pre>";
+	   //TODO - make this web server specific based upon CGI->server_software
+           resolve += "&lt;Directory "+docroot_path+"&gt;\n";
+           resolve += "  Options +ExecCGI\n";
+           resolve += "  AllowOverride All\n";
+           resolve += "  AddHandler cgi-handler .cgi\n";
+           resolve += "&lt;/Directory&gt;</pre></code></li>";
+       }              
+       html += "</ul><h4>How to resolve the problem</h4><ul>";
+       html += resolve;
+       html += "</ul>";
+   } else if (link.hasClass('install-3')) {
+       html = '';
+   }
+   return html;
+}
+function check_prereqs() {
+  pages.unshift( $('#upgrade').html() );
+  $('#upgrade').html('<img src="http://localhost/~breese/mt/mt-static/images/indicator.gif" />');
+  $.post('mt-install.cgi', 
+         { 
+           'json'    : 'check_prereqs',
+           'cgibin'  : cgibin_path,
+           'docroot' : docroot_path 
+         },
+         function(data){
+           $('#back').attr('disabled',false);
+           $('#upgrade').html(data.html);
+           $('#tryagain-prereq').click(function(){
+             if (open_drawer_is != 0) { close_drawer(); }
+             check_prereqs();
+           });
+           $('.fixme').click(function(){ 
+             var html = init_cpan_help( $(this), $(this).attr('title') );
+             toggle_drawer($(this).attr('title'),html); 
+           });
+         },
+         "json");
+}
+function begin() {
+  pages.unshift( $('#upgrade').html() );
+  $('#upgrade').html('<img src="http://localhost/~breese/mt/mt-static/images/indicator.gif" />');
+  $.post('mt-install.cgi', 
+         { 
+           'json'    : 'find_installs',
+           'cgibin'  : cgibin_path,
+           'docroot' : docroot_path 
+         },
+         function(data){
+           $('#back').attr('disabled',false);
+           $('#upgrade').html(data.html);
+           $('li.impossible input').attr('disabled',true);
+           $('.fixme').click(function(){ 
+             var html = init_setup_help( $(this), data.options );
+             toggle_drawer($(this).attr('id'),html); 
+           });
+           $('#next-checkprereq').click(function(){
+               install_type = $('ul.install_opt input[@checked=true]').val();
+               alert('install type: ' + install_type);
+	       check_prereqs();
+           });
+         },
+         "json");
+}
+
     </script>
 };
     $html .= <<EOH;
@@ -1028,11 +1164,16 @@ min-height: 360px;
   font-weight: bold;
   margin-bottom: 10px;
   }
+#container #drawer li {
+  list-style: square;
+}
+#drawer ul {
+  margin-left: 20px;
+  }
 #drawer-content {
   font-size: 1.1em;
   }
-#upgrade { text-align: center; }
-#upgrade form { text-align: left; }
+#upgrade img { text-align: center; }
 
 ul.paths li label {
   display: block;
@@ -1050,9 +1191,9 @@ ul {
   margin-left: 0;
   padding-left: 0;
   }
-#container form li {
+#container li {
   list-style: none;
- margin-left: 0;
+  margin-left: 0;
   margin-bottom: 10px;
   padding-left: 0;
   }
@@ -1202,7 +1343,7 @@ ul#profile-data li{margin-left:0;padding-left:0;list-style:none;}
         <div id="content-inner" class="inner pkg">
             <div id="main-content"><div id="main-content-inner" class="inner pkg">
                 <h2 id="page-title">Installation</h2>
-                <div class="upgrade">
+                <div id="upgrade">
 EOH
     print $html;
 }
@@ -1210,6 +1351,7 @@ EOH
 sub print_footer {
     print qq{
                 </div>
+                <button id="back">Back</button>
             </div>
         </div>
     </div>
