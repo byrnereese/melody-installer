@@ -10,11 +10,11 @@ the Melody platform. It reduces installation to the following steps:
 
 The on-screen instructions will:
 
-* help you to identify any steps you need to take to configure your 
+* help you to identify any steps you need to take to configure your
   server properly.
 * choose which install option is best for you.
 * create and setup your database.
-* download and install the Melody software and its prerequisites 
+* download and install the Melody software and its prerequisites
   for you.
 * setup your first user and get you off to the races.
 

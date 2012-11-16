@@ -35,7 +35,7 @@ to make corrections automatically.
 
 =head1 PROCESS
 
-1. Prompt the user for information about their server (with good  
+1. Prompt the user for information about their server (with good
 guesses as a default): docroot path, base url, cgi-bin path.
 
 2. Check to see what installation options are available and possible:
@@ -44,37 +44,37 @@ guesses as a default): docroot path, base url, cgi-bin path.
      b) install all of OM into a ExecCGI enabled directory in your docroot
      c) install app files into cgi-bin and static files into docroot
 
-3. Prompt user to select an installation option. For those options  
-which are not possible, due to permission or web server constraints,  
-the user will be given a link to learn precisely what they need to do  
+3. Prompt user to select an installation option. For those options
+which are not possible, due to permission or web server constraints,
+the user will be given a link to learn precisely what they need to do
 to resolve the conflict.
 
-4. Prompt user to specify where they want OM to be installed  
+4. Prompt user to specify where they want OM to be installed
 specifically.
 
-5. Check the server for installed prerequisites. If any core prereqs  
-are missing, block. If any optional prereqs are missing display user a  
-list of features that will not be available. Give user the option to  
-attempt to install missing prerequisites into the extlib directory of  
-OM. If there is a failure, let them know and give them instructions or  
-even an email they can send to their hosting provider detailing what  
+5. Check the server for installed prerequisites. If any core prereqs
+are missing, block. If any optional prereqs are missing display user a
+list of features that will not be available. Give user the option to
+attempt to install missing prerequisites into the extlib directory of
+OM. If there is a failure, let them know and give them instructions or
+even an email they can send to their hosting provider detailing what
 needs to be done.
 
-6. If everything checks out, then download OM. If perl possesses the  
-ability to unzip an archive than a single zip will be downloaded and  
-unzipped into the designated directory. If such an ability does not  
-exist, attempt to download and install Archive::Extract. If that  
+6. If everything checks out, then download OM. If perl possesses the
+ability to unzip an archive than a single zip will be downloaded and
+unzipped into the designated directory. If such an ability does not
+exist, attempt to download and install Archive::Extract. If that
 fails, then download each file independently and put it in proper place.
 
-7. Download manifest from server. Manifest will include CRC values.  
-Perform CRC check on ALL installed files. Error on any failure.  
+7. Download manifest from server. Manifest will include CRC values.
+Perform CRC check on ALL installed files. Error on any failure.
 Attempt to re-download any missing files.
 
 8. Collect DB connection info. Verify that they are correct.
 
 9. Check to see if Fast CGI is possible.
 
-9. Write user's mt-config.cgi file (with fcgi scripts setup if  
+9. Write user's mt-config.cgi file (with fcgi scripts setup if
 allowable).
 
 10. Attempt to harden server directories:
@@ -82,10 +82,10 @@ allowable).
      a) make support directory writable
      b) make other scripts and files unwritable by group
 
-11. Attempt to setup a crontab entry for run-periodic-tasks? Should I  
+11. Attempt to setup a crontab entry for run-periodic-tasks? Should I
 do this?
 
-12. Finish - tell user what they need to do to secure their server.  
+12. Finish - tell user what they need to do to secure their server.
 Offer to send them instructions via email.
 
 13. Kick user into standard OM/MT setup wizard to setup first account.
@@ -113,7 +113,7 @@ use File::Temp qw/ tempfile tempdir /;
 use constant VERSION   => 0.1;
 use constant DEBUG     => 1;
 use constant TEST_FILE => 'test.html';
-use constant OM_DOWNLOAD_URL 
+use constant OM_DOWNLOAD_URL
     => 'http://www.movabletype.org/downloads/stable/MTOS-4.25-en.zip';
 use constant ARCHIVE_EXTRACT_URL
     => 'http://cpansearch.perl.org/src/KANE/Archive-Extract-0.30/lib/Archive/Extract.pm';
@@ -121,7 +121,7 @@ use constant IPC_CMD_URL
     => 'http://cpansearch.perl.org/src/KANE/IPC-Cmd-0.42/lib/IPC/Cmd.pm';
 use constant PARAMS_CHECK_URL
     => 'http://cpansearch.perl.org/src/KANE/Params-Check-0.26/lib/Params/Check.pm';
-use constant MODULE_LOAD_COND_URL 
+use constant MODULE_LOAD_COND_URL
     => 'http://cpansearch.perl.org/src/KANE/Module-Load-Conditional-0.30/lib/Module/Load/Conditional.pm';
 use constant MODULE_LOAD_URL
     => 'http://cpansearch.perl.org/src/KANE/Module-Load-0.16/lib/Module/Load.pm';
@@ -166,7 +166,7 @@ my $PREREQS = {
 	description => 'CGI::Cookie is required for cookie authentication.',
     },
     'DBI' => {
-	version => 1.21, 
+	version => 1.21,
 	required => 1,
 	description => 'DBI is required to store data in database.',
     },
@@ -188,7 +188,7 @@ my $PREREQS = {
 	short => 'TrackBack',
     },
     'HTML::Parser' => {
-	version => 0, 
+	version => 0,
 	required => 0,
 	description => 'HTML::Parser is optional; It is needed if you wish to use the TrackBack system, the weblogs.com ping, or the MT Recently Updated ping.',
 	short => 'TrackBack',
@@ -207,7 +207,7 @@ my $PREREQS = {
     },
     'Scalar::Util' => {
 	version => 0,
-	required => 1, 
+	required => 1,
 	description => 'Scalar::Util is optional; It is needed if you want to use the Publish Queue feature.',
 	short => 'Publish Queue',
     },
@@ -230,7 +230,7 @@ my $PREREQS = {
 	short => "Some plugins",
     },
     'Crypt::DSA' => {
-	version => 0, 
+	version => 0,
 	required => 0,
 	description => 'Crypt::DSA is optional; if it is installed, comment registration sign-ins will be accelerated.',
 	short => 'Feature: High performant comment authentication',
@@ -249,7 +249,7 @@ my $PREREQS = {
 #    'Digest::MD5', 0, 0, 'This module is used by the Markdown text filter.','Markdown',
 #    'Text::Balanced', 0, 0, 'This module is required in mt-search.cgi if you are running Movable Type on Perl older than Perl 5.8.','Search',
     'FCGI' => {
-	version => 0, 
+	version => 0,
 	required => 0,
 	description => 'FCGI is needed in order to run under FastCGI.',
 	short => 'FastCGI',
@@ -260,8 +260,8 @@ my $PREREQS = {
 sub is_cgibin_writable {
    if (!-w $CGIBIN) {
 	chmod 0775, $CGIBIN;
-	if (!-w $CGIBIN) { 
-	    return 0; 
+	if (!-w $CGIBIN) {
+	    return 0;
 	}
     }
     return 1;
@@ -272,8 +272,8 @@ sub is_docroot_writable {
 #   debug("docroot is $DOCROOT");
    if (!-w $DOCROOT) {
 	chmod 0775, $DOCROOT;
-	if (!-w $DOCROOT) { 
-	    return 0; 
+	if (!-w $DOCROOT) {
+	    return 0;
 	}
     }
     return 1;
@@ -286,10 +286,10 @@ sub permissions_check {
 	debug("$dir is not writable. Try again.");
 	# Attempt to fix
 	chmod 0775, $dir;
-	if (!-w $dir) { 
+	if (!-w $dir) {
 	    debug("Nope, still not writable.");
 	    print "<p>This is what you do to fix your permissions problem.</p>";
-	    return 0; 
+	    return 0;
 	}
     }
     debug("$dir is writable");
@@ -325,7 +325,7 @@ sub download_dep {
     if (!-e $dir) {
 	debug("Could not create $dir");
 	return 0;
-    } 
+    }
     debug("Downloading $file into $dir");
     my $down = File::Download->new({ outfile => $dir });
     $down->download($url);
@@ -383,7 +383,7 @@ sub install {
 	archive => $down->saved,
     );
     my $ok = $archive->extract(
-	to => $dir 
+	to => $dir
     );
     if ($ok) {
 	print "<p>Unarchive successful! An unpacked MT lives in: ".$archive->extract_path."</p>";
@@ -406,7 +406,7 @@ sub install {
 	    $dest = File::Spec->catfile($DOCROOT, $FOLDER, $dest);
 	} elsif ($TYPE == 3) {
 	    # static in docroot
-	    if ($dest =~ /^mt-static/) { 
+	    if ($dest =~ /^mt-static/) {
 		debug("Installing static file");
 		$dest = File::Spec->catfile($DOCROOT, $dest);
 	    } else {
@@ -464,7 +464,7 @@ sub check_htaccess_and_cgi {
     open HTACCESS, ">$htaccess";
     print HTACCESS q{
 Options +ExecCGI +Includes
-AddHandler cgi-script .cgi 
+AddHandler cgi-script .cgi
     };
     close HTACCESS;
     my $cgi = File::Spec->catfile($dir, 'test.cgi');
@@ -483,7 +483,7 @@ print "ok";
 	if ($res->content ne 'ok') {
 #	    debug("Contents of test file are incorrect: ".$res->content);
 	    return 0;
-	} 
+	}
     } else {
 #	debug("Could not get test file.");
 	return 0;
@@ -536,10 +536,10 @@ $(document).ready(function(){
     var app = $('#folder-mthome input').val();
     var static = $('#folder-static input').val();
     $('#url-mthome input').val( baseurl + app + "/mt.cgi" );
-    $('#url-static input').val( baseurl + static + '/' ); 
+    $('#url-static input').val( baseurl + static + '/' );
   });
   var selected = 0;
-  $('.install-type').each(function(i,e){ 
+  $('.install-type').each(function(i,e){
      if ($("#" + this.id).hasClass('impossible')) {
        $('#' + this.id + ' input').attr('disabled', true);
      } else {
@@ -565,13 +565,13 @@ $(document).ready(function(){
 	$html .= q{    <li id="folder-mthome" class="pkg folder"><label>Folder to install application: <input type="text" name="folder" value="mt" size="40" /></label></li>};
 	$html .= q{    <li id="folder-static" class="pkg folder" style="display:none;"><label>Folder to install css and javascript files: <input type="text" name="folder-static" value="mt-static" size="40" /></label></li>};
 	$html .= q{  </ul>};
-	
+
 	$html .= q{  <ul class="urls">};
 	$html .= qq{    <li id="url-mthome" class="pkg wrap url"><label for="mthome">URL to Open Melody Admin:</label><input type="text" id="mthome" name="mthome" size="40" value="" /></li>};
-	
+
 	$html .= qq{    <li id="url-static" class="pkg wrap url" style="display: none"><label for="mtstatic">URL to Static Content:</label><input type="text" id="mtstatic" name="mtstatic" size="40" value="" /></li>};
 	$html .= q{  </ul>};
-	
+
 	$html .= q{  <p><button id="next-checkprereq">Next</button></p>};
     } else {
 	$html .= q{<p>It looks like your system is not ready yet. To install Open Melody try to fix one of the options above. Click "Fix me" for help.</p>};
@@ -618,16 +618,16 @@ sub find_installs {
 	    $installs->{$File::Find::dir}->{ok} = 1;
 	    $installs->{$File::Find::dir}->{app} = $File::Find::dir;
 	    $installs->{$File::Find::dir}->{static} = eval q{
-		BEGIN { 
+		BEGIN {
                   unshift @INC, File::Spec->catdir($File::Find::dir, "lib");
-                  unshift @INC, File::Spec->catdir($File::Find::dir, "extlib"); 
+                  unshift @INC, File::Spec->catdir($File::Find::dir, "extlib");
                   #print join('<br>',@INC);
                 }
                 require MT;
                 $ENV{MT_HOME} = $File::Find::dir;
                 my $mt = MT->new;
                 $mt->init_config( {
-                    Config => $File::Find::name, 
+                    Config => $File::Find::name,
                     Directory => $File::Find::dir,
                 });
                 my $path = $mt->static_file_path;
@@ -662,7 +662,7 @@ $(document).ready(function(){
     } else {
       dest_app = result;
     }
-    begin();    
+    begin();
   });
 });
 </script>
@@ -724,12 +724,12 @@ $(document).ready(function(){
   $('#baseurl').bind("keyup change",function() {
     var base = $('#baseurl').val();
     var lastchar = base.substr(base.length-1,1);
-    $('#cgibinurl').val( base + (lastchar == '/' ? '' : "/") + "cgi-bin/"); 
+    $('#cgibinurl').val( base + (lastchar == '/' ? '' : "/") + "cgi-bin/");
   });
   $('#docroot').bind("keyup change",function() {
     var base = $('#docroot').val();
     var lastchar = base.substr(base.length-1,1);
-    $('#cgibin').val( base + (lastchar == '/' ? '' : "/") + "cgi-bin/"); 
+    $('#cgibin').val( base + (lastchar == '/' ? '' : "/") + "cgi-bin/");
   });
   $('#begin').click(function(){
     /* Initialize all of the paths */
@@ -737,7 +737,7 @@ $(document).ready(function(){
     docroot_url  = $('#baseurl').val();
     cgibin_path  = $('#cgibin').val();
     cgibin_url   = $('#cgibinurl').val();
-    begin();    
+    begin();
   });
 });
 </script>
@@ -767,9 +767,9 @@ sub check_install_options {
     $options->{types}->{1}->{exists}    = (-e $CGIBIN);
     $options->{types}->{1}->{directory} = (-d $CGIBIN);
     $options->{types}->{1}->{static_ok} = cgibin_can_serve_static_files();
-    $options->{types}->{1}->{ok} = 
-	$options->{types}->{1}->{writable} && 
-	$options->{types}->{1}->{directory} && 
+    $options->{types}->{1}->{ok} =
+	$options->{types}->{1}->{writable} &&
+	$options->{types}->{1}->{directory} &&
 	$options->{types}->{1}->{static_ok};
 
     # Type 2: All in docroot
@@ -778,9 +778,9 @@ sub check_install_options {
     $options->{types}->{2}->{exists}    = (-e $DOCROOT);
     $options->{types}->{2}->{directory} = (-d $DOCROOT);
     $options->{types}->{2}->{htaccess_ok} = check_htaccess_and_cgi();
-    $options->{types}->{2}->{ok} = 
-	$options->{types}->{2}->{writable} && 
-	$options->{types}->{2}->{cgi_ok} && 
+    $options->{types}->{2}->{ok} =
+	$options->{types}->{2}->{writable} &&
+	$options->{types}->{2}->{cgi_ok} &&
 	$options->{types}->{2}->{htaccess_ok};
 
     # Type 3: Hybrid
@@ -790,8 +790,8 @@ sub check_install_options {
     $options->{types}->{3}->{docroot_exists} = (-e $DOCROOT);
     $options->{types}->{3}->{cgi_directory} = (-d $CGIBIN);
     $options->{types}->{3}->{docroot_directory} = (-d $DOCROOT);
-    $options->{types}->{3}->{ok} = 
-	$options->{types}->{3}->{cgi_writable} && 
+    $options->{types}->{3}->{ok} =
+	$options->{types}->{3}->{cgi_writable} &&
 	$options->{types}->{3}->{docroot_writable};
 
     return $options;
@@ -828,7 +828,7 @@ sub _getfile {
     my ($url) = @_;
 #    debug("Fetching $url");
     my $ua = new LWP::UserAgent;
-    $ua->agent("Movable Type Installer/".VERSION); 
+    $ua->agent("Movable Type Installer/".VERSION);
     my $req = new HTTP::Request GET => $url;
     return $ua->request($req);
 }
@@ -844,7 +844,7 @@ sub cgibin_can_serve_static_files {
 	if ($res->content ne 'ok') {
 #	    debug("Contents of test file are incorrect: ".$res->content);
 	    return 0;
-	} 
+	}
     } else {
 #	debug("Could not get test file.");
 	return 0;
@@ -966,18 +966,18 @@ var open_drawer_is = 0;
 var is_animating = 0;
 var pages = new Array();
 function toggle_drawer(opener,new_html) {
-  if (open_drawer_is == 0) { 
+  if (open_drawer_is == 0) {
     $('#drawer-content').html(new_html);
-    open_drawer(); 
+    open_drawer();
     open_drawer_is = opener;
-  } else if (open_drawer_is != 0) { 
+  } else if (open_drawer_is != 0) {
     if (open_drawer_is == opener) {
-      close_drawer(); 
+      close_drawer();
       open_drawer_is = 0;
     } else {
-      close_drawer(); 
+      close_drawer();
       $('#drawer-content').html(new_html);
-      open_drawer(); 
+      open_drawer();
       open_drawer_is = opener;
     }
   }
@@ -1027,14 +1027,14 @@ function init_setup_help(link,options) {
            if (!options.types[1].writable) {
                html += "<li>The cgi-bin directory you identified is not writable.</li>";
                resolve += '<li>Connect to your web server and change the permissions on the following directory <a href="#">learn how</a>:<br><code>' + cgibin_path + "</code></li>";
-           }              
+           }
            if (!options.types[1].directory) {
                html += "<li>The path you specified for your cgi-bin is not a directory.</li>";
-           }              
+           }
        }
        if (!options.types[1].static_ok) {
            html += "<li>The cgi-bin directory you identified is unable to serve static files like javascript, css or HTML.</li>";
-       }              
+       }
        html += "</ul><h4>How to resolve the problem</h4><ul>";
        html += resolve;
        html += "</ul>";
@@ -1047,10 +1047,10 @@ function init_setup_help(link,options) {
        } else {
            if (!options.types[2].writable) {
                html += "<li>The directory you identified is not writable.</li>";
-           }              
+           }
            if (!options.types[2].exists) {
                html += "<li>The path you specified does not exist. (TODO - fix me)</li>";
-           }              
+           }
        }
        if (!options.types[2].htaccess_ok) {
            html += "<li>The document root you specified is not capable of serving CGI applications.</li>";
@@ -1061,7 +1061,7 @@ function init_setup_help(link,options) {
            resolve += "  AllowOverride All\n";
            resolve += "  AddHandler cgi-handler .cgi\n";
            resolve += "&lt;/Directory&gt;</pre></code></li>";
-       }              
+       }
        html += "</ul><h4>How to resolve the problem</h4><ul>";
        html += resolve;
        html += "</ul>";
@@ -1073,11 +1073,11 @@ function init_setup_help(link,options) {
 function check_prereqs() {
   pages.unshift( $('#upgrade').html() );
   $('#upgrade').html('<img src="http://localhost/~breese/mt/mt-static/images/indicator.gif" />');
-  $.post('mt-install.cgi', 
-         { 
+  $.post('mt-install.cgi',
+         {
            'json'    : 'check_prereqs',
            'cgibin'  : cgibin_path,
-           'docroot' : docroot_path 
+           'docroot' : docroot_path
          },
          function(data){
            $('#back').attr('disabled',false);
@@ -1086,9 +1086,9 @@ function check_prereqs() {
              if (open_drawer_is != 0) { close_drawer(); }
              check_prereqs();
            });
-           $('.fixme').click(function(){ 
+           $('.fixme').click(function(){
              var html = init_cpan_help( $(this), $(this).attr('title') );
-             toggle_drawer($(this).attr('title'),html); 
+             toggle_drawer($(this).attr('title'),html);
            });
          },
          "json");
@@ -1096,19 +1096,19 @@ function check_prereqs() {
 function begin() {
   pages.unshift( $('#upgrade').html() );
   $('#upgrade').html('<img src="http://localhost/~breese/mt/mt-static/images/indicator.gif" />');
-  $.post('mt-install.cgi', 
-         { 
+  $.post('mt-install.cgi',
+         {
            'json'    : 'find_installs',
            'cgibin'  : cgibin_path,
-           'docroot' : docroot_path 
+           'docroot' : docroot_path
          },
          function(data){
            $('#back').attr('disabled',false);
            $('#upgrade').html(data.html);
            $('li.impossible input').attr('disabled',true);
-           $('.fixme').click(function(){ 
+           $('.fixme').click(function(){
              var html = init_setup_help( $(this), data.options );
-             toggle_drawer($(this).attr('id'),html); 
+             toggle_drawer($(this).attr('id'),html);
            });
            $('#next-checkprereq').click(function(){
                install_type = $('ul.install_opt input[@checked=true]').val();
@@ -1136,17 +1136,17 @@ body {
   border: 1px solid #cfdde5;
   background-image: url('http://localhost/~breese/mt/mt-static/images/chromeless/chromeless_bg_b.png');
   background-repeat: repeat-x;
-  background-position: bottom center; 
+  background-position: bottom center;
   background-color: white;
   z-index: 1;
 min-height: 360px;
   }
-#drawer { 
+#drawer {
   position: absolute;
   top: 10px;
-  border: 1px solid #CFDDEF; 
-  width: 293px; 
-  height: 318px; 
+  border: 1px solid #CFDDEF;
+  width: 293px;
+  height: 318px;
   padding: 15px;
   background: white;
   z-index: -1;
@@ -1184,8 +1184,8 @@ ul.paths li label {
 ul.paths li input {
   float: left;
   }
-li.impossible { 
-  color: red; 
+li.impossible {
+  color: red;
   }
 ul {
   margin-left: 0;
@@ -1225,7 +1225,7 @@ input#mtstatic {
 
 /* Begin Simple CSS */
 /* Movable Type (r) (C) 2001-2009 Six Apart, Ltd. All Rights Reserved
- * This file is combined from multiple sources.  
+ * This file is combined from multiple sources.
  * Consult the source files for their
  * respective licenses and copyrights.
  */
@@ -1360,7 +1360,7 @@ sub print_footer {
     <div id="footer">
 
         <div class="inner">
-            
+
         </div>
     </div>
 </div><!-- container-inner-->
@@ -1438,7 +1438,7 @@ sub download {
 		  unless ($file) {
 		      my $req = $res->request;  # not always there
 		      my $rurl = $req ? $req->url : $url;
-		      
+
 		      $file = ($rurl->path_segments)[-1];
 		      if (!defined($file) || !length($file)) {
 			  $file = "index";
@@ -1468,7 +1468,7 @@ sub download {
 		  {
 		      die "Will not save <$url> as \"$file\".\nPlease override file name on the command line.\n";
 		  }
-		  
+
 		  if (defined $directory) {
 		      require File::Spec;
 		      $file = File::Spec->catfile($directory, $file);
@@ -1499,10 +1499,10 @@ sub download {
 	      $self->{start_t} = time;
 	      $self->{last_dur} = 0;
 	  }
-	  
+
 	  print FILE $_[0] or die "Can't write to $file: $!\n";
 	  $self->{size} += length($_[0]);
-	  
+
 	  if (defined $self->{length}) {
 	      my $dur  = time - $self->{start_t};
 	      if ($dur != $self->{last_dur}) {  # don't update too often
@@ -1529,11 +1529,11 @@ sub download {
 	if ($dur) {
 	    my $speed = fbytes($self->{size}/$dur) . "/sec";
 	}
-	
+
 	if (my $mtime = $res->last_modified) {
 	    utime time, $mtime, $file;
 	}
-	
+
 	if ($res->header("X-Died") || !$res->is_success) {
 	    if (my $died = $res->header("X-Died")) {
 		$self->{status} = $died;
@@ -1775,7 +1775,7 @@ sub _initConvert {
 	$self->{_stack_myself} = [];
 	$self->{indent_count}  = 0;
 
-	$self->{_delstr} = 
+	$self->{_delstr} =
 		$self->{delimiter} ? ($self->{delimiter} == 1 ? ': ' : ' : ') : ':';
 
 	$self;
